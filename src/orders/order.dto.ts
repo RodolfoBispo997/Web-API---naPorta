@@ -4,6 +4,7 @@ import {
   IsArray,
   IsDefined,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -143,11 +144,13 @@ export class CreateOrderDto {
   expectedDeliveryDate!: string;
 
   @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => CustomerDto)
   customer!: CustomerDto;
 
   @IsDefined()
+  @IsObject()
   @ValidateNested()
   @Type(() => DeliveryAddressDto)
   deliveryAddress!: DeliveryAddressDto;

@@ -163,6 +163,18 @@ describe('orders HTTP routes', () => {
     ]);
   });
 
+  it.each(['customer', 'deliveryAddress'] as const)(
+    'rejects an array for %s without calling persistence',
+    async (field) => {
+      await request(app.getHttpServer())
+        .post('/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...input, [field]: [] })
+        .expect(400);
+      expect(create).not.toHaveBeenCalled();
+    },
+  );
+
   it('returns 409 for a duplicate order number', async () => {
     create.mockRejectedValueOnce({
       code: 'P2002',

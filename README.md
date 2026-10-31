@@ -271,18 +271,33 @@ Resposta `200 OK`: o pedido atualizado no mesmo formato de `GET /orders/:id`. UU
 - `404 Not Found`: pedido inexistente ou marcado como excluído logicamente.
 - `409 Conflict`: `orderNumber` já utilizado.
 
-## Usuário de demonstração
+## Seed de demonstração
 
-`npm run db:seed` cria o usuário indicado por `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD`, usando bcrypt com custo 12. O e-mail é normalizado da mesma forma que no login. A senha deve ter entre 1 e 72 bytes UTF-8; não há regra de complexidade. Se o e-mail já existir, o seed informa isso e não altera senha nem qualquer outro dado. Em uma disputa concorrente pela criação, a conta vencedora também é preservada; outros erros do banco são reportados como falha.
+`npm run db:seed` prepara o usuário local e pedidos fictícios. Antes, inicie o PostgreSQL, configure `DATABASE_URL`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD` no `.env` e aplique as migrations versionadas com `npm run db:migrate:deploy`. O seed é destinado somente à demonstração local; os clientes, documentos e endereços abaixo são dados inventados.
 
-Se o usuário já existia e a senha configurada não corresponde à senha armazenada, o seed não redefine a conta. Use a senha já conhecida dessa conta ou configure outro e-mail de demonstração para criar um usuário separado. A senha de demonstração não é fallback; as duas variáveis precisam estar configuradas explicitamente.
+O usuário é criado com bcrypt de custo 12. O e-mail é normalizado como no login e a senha deve ter entre 1 e 72 bytes UTF-8, sem regra de complexidade. Se o e-mail já existir, o seed preserva os dados e a senha. Se a senha configurada não corresponder à conta existente, use a senha conhecida ou configure outro e-mail de demonstração; o seed não redefine a conta.
+
+Os pedidos usam números fixos e status distintos para facilitar a avaliação:
+
+| Número | Status | `createdAt` UTC | Previsão de entrega |
+| --- | --- | --- | --- |
+| `DEMO-001` | `PENDING` | `2026-01-05T10:00:00.000Z` | `2026-01-15` |
+| `DEMO-002` | `PROCESSING` | `2026-02-10T14:30:00.000Z` | `2026-02-20` |
+| `DEMO-003` | `DELIVERED` | `2026-03-15T09:15:00.000Z` | `2026-03-17` |
+| `DEMO-004` | `CANCELLED` | `2026-04-20T16:45:00.000Z` | `2026-04-30` |
+
+Cada pedido tem itens demonstrativos com preços decimais em texto. Para consultar o pedido em processamento por status e dia de criação, use `GET /orders?status=PROCESSING&startDate=2026-02-10&endDate=2026-02-10` com o token Bearer obtido no login.
+
+O seed pode ser repetido: se um número já existir, não modifica nem apaga o pedido ou seus itens, mesmo quando o pedido foi editado ou está excluído logicamente. A unicidade do número continua reservada. O terminal informa quantos pedidos foram criados e quantos já existiam; não imprime senha ou hash.
+
+Cada pedido e seus itens são criados em uma escrita aninhada atômica. A lista inteira e o usuário não formam uma única transação: se ocorrer falha após alguns pedidos, os pedidos concluídos permanecem; uma execução posterior os conta como existentes e tenta criar os números que faltarem. Outros erros de banco são propagados e fazem o comando terminar com código diferente de zero; uma disputa concorrente é tratada como existência somente quando o erro identifica a restrição única de `order_number` e a linha conflitante é encontrada.
 
 ## Migrations e comandos
 
 - `npm run prisma:generate`: gera o Prisma Client.
 - `npm run db:migrate:deploy`: aplica migrations já versionadas.
 - `npm run db:migrate`: comando de desenvolvimento para criar e aplicar migrations.
-- `npm run db:seed`: cria o usuário local de demonstração somente se o e-mail ainda não existir.
+- `npm run db:seed`: cria o usuário demonstrativo se ausente e insere os pedidos fictícios `DEMO-001` a `DEMO-004` sem alterar registros existentes.
 - `npm run db:status`: consulta o estado das migrations.
 - `npm run lint`: verifica o código TypeScript em `src/` e `test/`.
 - `npm test` e `npm run test:e2e`: executam testes unitários e HTTP com módulo Nest e Prisma mockado; não usam o banco principal nem executam o seed. Incluem os testes das rotas de criação, consulta, listagem, atualização e exclusão lógica.

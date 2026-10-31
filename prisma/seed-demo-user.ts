@@ -5,6 +5,7 @@ import {
   DemoUserConfigurationError,
   createDemoUserIfMissing,
 } from './demo-user-seed.js';
+import { createDemoOrdersIfMissing } from './demo-orders-seed.js';
 
 async function seedDemoUser(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -32,11 +33,15 @@ async function seedDemoUser(): Promise<void> {
   });
 
   try {
-    const result = await createDemoUserIfMissing(prisma, email, password);
+    const userResult = await createDemoUserIfMissing(prisma, email, password);
+    const ordersResult = await createDemoOrdersIfMissing(prisma);
     console.info(
-      result === 'created'
+      userResult === 'created'
         ? 'Demo user created.'
         : 'Demo user already exists; existing data was not changed.',
+    );
+    console.info(
+      `Demo orders: ${ordersResult.created} created, ${ordersResult.alreadyExisted} already existed.`,
     );
   } finally {
     await prisma.$disconnect();
@@ -50,7 +55,7 @@ try {
     console.error(error.message);
   } else {
     console.error(
-      'Demo user seed failed. Check database availability and environment configuration.',
+      'Demo data seed failed. Check database availability and environment configuration.',
     );
   }
   process.exitCode = 1;

@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(320)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("users")
+}
+
+model Order {
+  id                   String      @id @default(uuid()) @db.Uuid
+  orderNumber          String      @unique @map("order_number") @db.VarChar(64)
+  status               OrderStatus @default(PENDING)
+  expectedDeliveryDate DateTime    @map("expected_delivery_date") @db.Date
+  customerName         String      @map("customer_name") @db.VarChar(200)
+  customerDocument     String      @map("customer_document") @db.VarChar(40)
+  deliveryStreet       String      @map("delivery_street") @db.VarChar(200)
+  deliveryNumber       String      @map("delivery_number") @db.VarChar(40)
+  deliveryComplement   String?     @map("delivery_complement") @db.VarChar(120)
+  deliveryNeighborhood String      @map("delivery_neighborhood") @db.VarChar(120)
+  deliveryCity         String      @map("delivery_city") @db.VarChar(120)
+  deliveryState        String      @map("delivery_state") @db.VarChar(120)
+  deliveryPostalCode   String      @map("delivery_postal_code") @db.VarChar(32)
+  deliveryCountry      String      @map("delivery_country") @db.VarChar(120)
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt            DateTime?   @map("deleted_at") @db.Timestamptz(3)
+  items                OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  description String  @db.VarChar(500)
+  price       Decimal @db.Decimal(12, 2)
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+}

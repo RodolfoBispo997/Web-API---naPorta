@@ -65,6 +65,17 @@ describe('OrdersService', () => {
   const findFirst = vi.fn();
   const findMany = vi.fn();
   const count = vi.fn();
+  const updateMany = vi.fn();
+  const itemDeleteMany = vi.fn();
+  const itemCreateMany = vi.fn();
+  const transactionClient = {
+    order: { updateMany, findFirst },
+    orderItem: { deleteMany: itemDeleteMany, createMany: itemCreateMany },
+  };
+  const transaction = vi.fn(
+    async (callback: (tx: typeof transactionClient) => Promise<unknown>) =>
+      callback(transactionClient),
+  );
   let service: OrdersService;
 
   beforeEach(() => {
@@ -73,8 +84,16 @@ describe('OrdersService', () => {
     findFirst.mockResolvedValue(makeOrder());
     findMany.mockResolvedValue([makeOrder()]);
     count.mockResolvedValue(1);
+    updateMany.mockResolvedValue({ count: 1 });
+    itemDeleteMany.mockResolvedValue({ count: 2 });
+    itemCreateMany.mockResolvedValue({ count: 2 });
+    transaction.mockImplementation(
+      async (callback: (tx: typeof transactionClient) => Promise<unknown>) =>
+        callback(transactionClient),
+    );
     service = new OrdersService({
-      order: { create, findFirst, findMany, count },
+      order: { create, findFirst, findMany, count, updateMany },
+      $transaction: transaction,
     } as unknown as PrismaService);
   });
 
@@ -240,5 +259,84 @@ describe('OrdersService', () => {
       data: [],
       meta: { page: 4, limit: 5, total: 11, totalPages: 3 },
     });
+  });
+
+  it('updates only supplied scalar, customer, and address fields in a transaction', async () => {
+    const response = await service.update('order-id', {
+      orderNumber: 'ORD-UPDATED',
+      status: 'PROCESSING',
+      customer: { name: 'Updated customer' },
+      deliveryAddress: { complement: null, city: 'Updated city' },
+    });
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'order-id', deletedAt: null },
+      data: {
+        updatedAt: expect.any(Date),
+        orderNumber: 'ORD-UPDATED',
+        status: 'PROCESSING',
+        customerName: 'Updated customer',
+        deliveryComplement: null,
+        deliveryCity: 'Updated city',
+      },
+    });
+    expect(itemDeleteMany).not.toHaveBeenCalled();
+    expect(itemCreateMany).not.toHaveBeenCalled();
+    expect(response.orderNumber).toBe('ORD-100');
+  });
+
+  it('replaces all items only when items are supplied and returns the updated relation', async () => {
+    await service.update('order-id', {
+      items: [{ description: 'Replacement', price: '12.30' }],
+    });
+    expect(updateMany.mock.calls[0][0].data).toEqual({
+      updatedAt: expect.any(Date),
+    });
+    expect(itemDeleteMany).toHaveBeenCalledWith({
+      where: { orderId: 'order-id' },
+    });
+    expect(itemCreateMany).toHaveBeenCalledWith({
+      data: [
+        { orderId: 'order-id', description: 'Replacement', price: '12.30' },
+      ],
+    });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: 'order-id', deletedAt: null },
+      include: { items: true },
+    });
+  });
+
+  it('returns not found when a conditional update finds no active order', async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(
+      service.update('missing', { status: 'DELIVERED' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(itemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('maps an order number conflict on update without hiding other database errors', async () => {
+    updateMany.mockRejectedValueOnce({
+      code: 'P2002',
+      meta: { target: ['order_number'] },
+    });
+    await expect(
+      service.update('order-id', { orderNumber: 'ORD-100' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('soft deletes conditionally without deleting the order or its items', async () => {
+    await expect(service.remove('order-id')).resolves.toBeUndefined();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'order-id', deletedAt: null },
+      data: { deletedAt: expect.any(Date) },
+    });
+    expect(itemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('returns not found when an order is already deleted', async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(service.remove('deleted-id')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

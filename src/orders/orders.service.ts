@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { CreateOrderDto } from './order.dto.js';
 import type { ListOrdersQueryDto } from './list-orders-query.dto.js';
+import type { UpdateOrderDto } from './update-order.dto.js';
 import { toOrderResponse, type OrderResponse } from './order-response.js';
 
 function isOrderNumberUniqueViolation(error: unknown): boolean {
@@ -140,5 +141,94 @@ export class OrdersService {
         totalPages: total === 0 ? 0 : Math.ceil(total / limit),
       },
     };
+  }
+
+  async update(id: string, input: UpdateOrderDto): Promise<OrderResponse> {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const data: Prisma.OrderUpdateManyMutationInput = {
+          updatedAt: new Date(),
+        };
+        if (input.orderNumber !== undefined) {
+          data.orderNumber = input.orderNumber;
+        }
+        if (input.status !== undefined) data.status = input.status;
+        if (input.expectedDeliveryDate !== undefined) {
+          data.expectedDeliveryDate = parseDateOnly(input.expectedDeliveryDate);
+        }
+        if (input.customer?.name !== undefined) {
+          data.customerName = input.customer.name;
+        }
+        if (input.customer?.document !== undefined) {
+          data.customerDocument = input.customer.document;
+        }
+        if (input.deliveryAddress?.street !== undefined) {
+          data.deliveryStreet = input.deliveryAddress.street;
+        }
+        if (input.deliveryAddress?.number !== undefined) {
+          data.deliveryNumber = input.deliveryAddress.number;
+        }
+        if (input.deliveryAddress?.complement !== undefined) {
+          data.deliveryComplement = input.deliveryAddress.complement;
+        }
+        if (input.deliveryAddress?.neighborhood !== undefined) {
+          data.deliveryNeighborhood = input.deliveryAddress.neighborhood;
+        }
+        if (input.deliveryAddress?.city !== undefined) {
+          data.deliveryCity = input.deliveryAddress.city;
+        }
+        if (input.deliveryAddress?.state !== undefined) {
+          data.deliveryState = input.deliveryAddress.state;
+        }
+        if (input.deliveryAddress?.postalCode !== undefined) {
+          data.deliveryPostalCode = input.deliveryAddress.postalCode;
+        }
+        if (input.deliveryAddress?.country !== undefined) {
+          data.deliveryCountry = input.deliveryAddress.country;
+        }
+
+        const result = await transaction.order.updateMany({
+          where: { id, deletedAt: null },
+          data,
+        });
+        if (result.count === 0) {
+          throw new NotFoundException('Order not found.');
+        }
+
+        if (input.items !== undefined) {
+          await transaction.orderItem.deleteMany({ where: { orderId: id } });
+          await transaction.orderItem.createMany({
+            data: input.items.map((item) => ({
+              orderId: id,
+              description: item.description,
+              price: item.price,
+            })),
+          });
+        }
+
+        const order = await transaction.order.findFirst({
+          where: { id, deletedAt: null },
+          include: { items: true },
+        });
+        if (!order) throw new NotFoundException('Order not found.');
+        return toOrderResponse(order);
+      });
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      if (isOrderNumberUniqueViolation(error)) {
+        throw new ConflictException(
+          'An order with this orderNumber already exists.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async remove(id: string): Promise<void> {
+    const result = await this.prisma.order.updateMany({
+      where: { id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    if (result.count === 0) throw new NotFoundException('Order not found.');
   }
 }

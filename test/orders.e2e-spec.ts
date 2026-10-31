@@ -83,7 +83,20 @@ describe('orders HTTP routes', () => {
   const findFirst = vi.fn();
   const findMany = vi.fn();
   const count = vi.fn();
-  const prismaMock = { order: { create, findFirst, findMany, count } };
+  const updateMany = vi.fn();
+  const itemDeleteMany = vi.fn();
+  const itemCreateMany = vi.fn();
+  const transaction = vi.fn(
+    async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        order: { updateMany, findFirst },
+        orderItem: { deleteMany: itemDeleteMany, createMany: itemCreateMany },
+      }),
+  );
+  const prismaMock = {
+    order: { create, findFirst, findMany, count, updateMany },
+    $transaction: transaction,
+  };
 
   beforeAll(async () => {
     process.env.JWT_SECRET = testSecret;
@@ -109,6 +122,9 @@ describe('orders HTTP routes', () => {
     findFirst.mockResolvedValue(makeOrder());
     findMany.mockResolvedValue([makeOrder()]);
     count.mockResolvedValue(1);
+    updateMany.mockResolvedValue({ count: 1 });
+    itemDeleteMany.mockResolvedValue({ count: 2 });
+    itemCreateMany.mockResolvedValue({ count: 1 });
   });
 
   afterAll(async () => {
@@ -393,6 +409,145 @@ describe('orders HTTP routes', () => {
     });
   });
 
+  it('partially updates order, customer, and address and preserves omitted values', async () => {
+    const response = await request(app.getHttpServer())
+      .patch(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        orderNumber: ' ORD-HTTP-UPDATED ',
+        status: 'PROCESSING',
+        customer: { name: ' Updated Ada ' },
+        deliveryAddress: { complement: null },
+      })
+      .expect(200);
+    expect(response.body.items).toHaveLength(2);
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: orderId, deletedAt: null },
+      data: {
+        updatedAt: expect.any(Date),
+        orderNumber: 'ORD-HTTP-UPDATED',
+        status: 'PROCESSING',
+        customerName: 'Updated Ada',
+        deliveryComplement: null,
+      },
+    });
+    expect(itemDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it('replaces items as a whole when an item array is supplied', async () => {
+    await request(app.getHttpServer())
+      .patch(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ items: [{ description: ' New item ', price: '12.30' }] })
+      .expect(200);
+    expect(itemDeleteMany).toHaveBeenCalledWith({
+      where: { orderId },
+    });
+    expect(itemCreateMany).toHaveBeenCalledWith({
+      data: [{ orderId, description: 'New item', price: '12.30' }],
+    });
+  });
+
+  it.each(['PENDING', 'PROCESSING', 'DELIVERED', 'CANCELLED'])(
+    'accepts status update %s',
+    async (status) => {
+      await request(app.getHttpServer())
+        .patch(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ status })
+        .expect(200);
+      expect(updateMany.mock.calls[0][0].data).toMatchObject({
+        status,
+        updatedAt: expect.any(Date),
+      });
+    },
+  );
+
+  it.each([
+    {},
+    { customer: {} },
+    { deliveryAddress: {} },
+    { customer: null },
+    { status: null },
+    { orderNumber: null },
+    { expectedDeliveryDate: null },
+    { customer: { name: null } },
+    { customer: { name: 'Valid', document: null } },
+    { deliveryAddress: { street: null } },
+    { items: null },
+    { items: [] },
+    { items: [{ description: 'Item', price: null }] },
+    { items: [{ description: 'Item', price: '-1.00' }] },
+    { items: [{ description: 'Item', price: '1.001' }] },
+    { expectedDeliveryDate: '2026-02-29' },
+    { status: 'UNKNOWN' },
+    { unknown: true },
+    { customer: { name: 'Valid', unknown: true } },
+  ])('rejects invalid patch payload %j before calling Prisma', async (body) => {
+    await request(app.getHttpServer())
+      .patch(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send(body)
+      .expect(400);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a missing update and 409 for an order number conflict', async () => {
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    await request(app.getHttpServer())
+      .patch(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'DELIVERED' })
+      .expect(404);
+    updateMany.mockRejectedValueOnce({
+      code: 'P2002',
+      meta: { target: ['order_number'] },
+    });
+    await request(app.getHttpServer())
+      .patch(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ orderNumber: 'ORD-DUPLICATE' })
+      .expect(409);
+  });
+
+  it('soft deletes with 204 and returns 404 on a repeated delete', async () => {
+    await request(app.getHttpServer())
+      .delete(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(204)
+      .expect('');
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: orderId, deletedAt: null },
+      data: { deletedAt: expect.any(Date) },
+    });
+    updateMany.mockResolvedValueOnce({ count: 0 });
+    await request(app.getHttpServer())
+      .delete(`/orders/${orderId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
+  });
+
+  it.each([
+    ['PATCH', `/orders/${orderId}`, { status: 'PROCESSING' }],
+    ['DELETE', `/orders/${orderId}`, undefined],
+  ])('rejects malformed UUID for %s', async (method, path, body) => {
+    const endpoint = request(app.getHttpServer());
+    if (method === 'PATCH') {
+      await endpoint
+        .patch('/orders/not-a-uuid')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body)
+        .expect(400);
+    } else {
+      await endpoint
+        .delete('/orders/not-a-uuid')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+    }
+  });
+
   it('returns 404 when the order does not exist or is deleted', async () => {
     findFirst.mockResolvedValueOnce(null);
     await request(app.getHttpServer())
@@ -412,10 +567,16 @@ describe('orders HTTP routes', () => {
     ['POST', '/orders', input],
     ['GET', '/orders', undefined],
     ['GET', `/orders/${orderId}`, undefined],
+    ['PATCH', `/orders/${orderId}`, { status: 'PROCESSING' }],
+    ['DELETE', `/orders/${orderId}`, undefined],
   ])('requires a valid bearer token for %s %s', async (method, path, body) => {
     const unauthenticated = request(app.getHttpServer());
     if (method === 'POST') {
       await unauthenticated.post(path).send(body).expect(401);
+    } else if (method === 'PATCH') {
+      await unauthenticated.patch(path).send(body).expect(401);
+    } else if (method === 'DELETE') {
+      await unauthenticated.delete(path).expect(401);
     } else {
       await unauthenticated.get(path).expect(401);
     }
@@ -425,6 +586,8 @@ describe('orders HTTP routes', () => {
     ['POST', '/orders', input],
     ['GET', '/orders', undefined],
     ['GET', `/orders/${orderId}`, undefined],
+    ['PATCH', `/orders/${orderId}`, { status: 'PROCESSING' }],
+    ['DELETE', `/orders/${orderId}`, undefined],
   ])(
     'rejects an invalid bearer token for %s %s',
     async (method, path, body) => {
@@ -434,6 +597,17 @@ describe('orders HTTP routes', () => {
           .post(path)
           .set('Authorization', 'Bearer invalid-token')
           .send(body)
+          .expect(401);
+      } else if (method === 'PATCH') {
+        await endpoint
+          .patch(path)
+          .set('Authorization', 'Bearer invalid-token')
+          .send(body)
+          .expect(401);
+      } else if (method === 'DELETE') {
+        await endpoint
+          .delete(path)
+          .set('Authorization', 'Bearer invalid-token')
           .expect(401);
       } else {
         await endpoint

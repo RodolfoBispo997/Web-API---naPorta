@@ -160,6 +160,26 @@ describe('orders PostgreSQL integration', () => {
     });
   }
 
+  async function waitForBlockedOrderWrite(): Promise<void> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const [activity] = await prisma.$queryRaw<Array<{ waiting: boolean }>>`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND pid <> pg_backend_pid()
+            AND wait_event_type = 'Lock'
+            AND query ILIKE '%UPDATE%orders%'
+        ) AS waiting
+      `;
+      if (activity.waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(
+      'Timed out waiting for the PATCH write to block on the locked order.',
+    );
+  }
+
   it('persists an order and related items through the HTTP route', async () => {
     const payload = validOrder();
     const response = await request(app.getHttpServer())
@@ -349,5 +369,196 @@ describe('orders PostgreSQL integration', () => {
       total: 3,
       totalPages: 2,
     });
+  });
+
+  it('rolls back scalar changes and item replacement when inserting a replacement item fails', async () => {
+    const created = await createOrder();
+    const before = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "order_items" ADD CONSTRAINT "${failureConstraint}" CHECK ("description" <> '${failureMarker}')`,
+    );
+    failureConstraintCreated = true;
+
+    try {
+      await request(app.getHttpServer())
+        .patch(`/orders/${created.body.id as string}`)
+        .set('Authorization', authorizationHeader())
+        .send({
+          status: 'PROCESSING',
+          items: [{ description: failureMarker, price: '5.00' }],
+        })
+        .expect(500);
+    } finally {
+      await dropFailureConstraintIfCreated();
+    }
+
+    const after = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    expect(after?.status).toBe('PENDING');
+    expect(after?.items.map(({ id }) => id)).toEqual(
+      before?.items.map(({ id }) => id),
+    );
+  });
+
+  it('updates partial fields and replaces persisted items with new IDs', async () => {
+    const created = await createOrder();
+    const previous = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    const response = await request(app.getHttpServer())
+      .patch(`/orders/${created.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .send({
+        status: 'PROCESSING',
+        customer: { name: 'Partially updated customer' },
+        deliveryAddress: { complement: null },
+        items: [{ description: 'Replacement item', price: '12.30' }],
+      })
+      .expect(200);
+    const persisted = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+
+    expect(persisted?.status).toBe('PROCESSING');
+    expect(persisted?.customerName).toBe('Partially updated customer');
+    expect(persisted?.customerDocument).toBe('DOC-IT-1');
+    expect(persisted?.deliveryComplement).toBeNull();
+    expect(persisted?.deliveryCity).toBe('Campinas');
+    expect(persisted?.items).toHaveLength(1);
+    expect(persisted?.items[0].description).toBe('Replacement item');
+    expect(persisted?.items[0].id).not.toBe(previous?.items[0].id);
+    expect(response.body.items[0].price).toBe('12.30');
+  });
+
+  it('allows replacing only the item list while retaining other order fields', async () => {
+    const created = await createOrder();
+    const previous = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    await request(app.getHttpServer())
+      .patch(`/orders/${created.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .send({
+        items: [{ description: 'Items-only replacement', price: '2.50' }],
+      })
+      .expect(200);
+    const persisted = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    expect(persisted?.status).toBe('PENDING');
+    expect(persisted?.customerName).toBe('Integration Customer');
+    expect(persisted?.items).toHaveLength(1);
+    expect(persisted?.items[0].id).not.toBe(previous?.items[0].id);
+  });
+
+  it('returns conflict when PATCH reuses an order number already stored in PostgreSQL', async () => {
+    const first = await createOrder();
+    const second = await createOrder();
+    await request(app.getHttpServer())
+      .patch(`/orders/${first.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .send({ orderNumber: second.body.orderNumber })
+      .expect(409);
+
+    const persisted = await prisma.order.findUnique({
+      where: { id: first.body.id as string },
+    });
+    expect(persisted?.orderNumber).toBe(first.body.orderNumber);
+  });
+
+  it('soft deletes without removing rows or items and rejects later reads, updates, repeated deletes, and number reuse', async () => {
+    const created = await createOrder();
+    const before = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    await request(app.getHttpServer())
+      .delete(`/orders/${created.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .expect(204);
+
+    const persisted = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+      include: { items: true },
+    });
+    expect(persisted?.deletedAt).toBeInstanceOf(Date);
+    expect(persisted?.items.map(({ id }) => id)).toEqual(
+      before?.items.map(({ id }) => id),
+    );
+    await request(app.getHttpServer())
+      .get(`/orders/${created.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .expect(404);
+    const list = await request(app.getHttpServer())
+      .get('/orders')
+      .query({ orderNumber: created.body.orderNumber })
+      .set('Authorization', authorizationHeader())
+      .expect(200);
+    expect(list.body.data).toEqual([]);
+    await request(app.getHttpServer())
+      .patch(`/orders/${created.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .send({ status: 'PROCESSING' })
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete(`/orders/${created.body.id as string}`)
+      .set('Authorization', authorizationHeader())
+      .expect(404);
+    await request(app.getHttpServer())
+      .post('/orders')
+      .set('Authorization', authorizationHeader())
+      .send(validOrder({ orderNumber: created.body.orderNumber }))
+      .expect(409);
+  });
+
+  it('serializes a PATCH behind a concurrent soft delete and returns 404 without changing the order', async () => {
+    const created = await createOrder();
+    let signalDeleteHasUpdated!: () => void;
+    let releaseDelete!: () => void;
+    const deleteHasUpdated = new Promise<void>((resolve) => {
+      signalDeleteHasUpdated = resolve;
+    });
+    const allowDeleteCommit = new Promise<void>((resolve) => {
+      releaseDelete = resolve;
+    });
+    const deleteTransaction = prisma.$transaction(async (transaction) => {
+      await transaction.order.updateMany({
+        where: { id: created.body.id as string, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      signalDeleteHasUpdated();
+      await allowDeleteCommit;
+    });
+
+    try {
+      await deleteHasUpdated;
+      const patchResponse = request(app.getHttpServer())
+        .patch(`/orders/${created.body.id as string}`)
+        .set('Authorization', authorizationHeader())
+        .send({ status: 'PROCESSING' })
+        .then((response) => response);
+      await waitForBlockedOrderWrite();
+      releaseDelete();
+      await deleteTransaction;
+      expect((await patchResponse).status).toBe(404);
+    } finally {
+      releaseDelete();
+      await deleteTransaction;
+    }
+
+    const persisted = await prisma.order.findUnique({
+      where: { id: created.body.id as string },
+    });
+    expect(persisted?.status).toBe('PENDING');
+    expect(persisted?.deletedAt).toBeInstanceOf(Date);
   });
 });

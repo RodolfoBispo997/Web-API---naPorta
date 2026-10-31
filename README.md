@@ -4,10 +4,10 @@ API NestJS para gerenciamento de pedidos, construída em etapas.
 
 ## Estado atual
 
-- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração, criação, consulta individual e listagem paginada de pedidos e testes unitários/HTTP/de integração.
-- **Ainda não implementado:** edição, exclusão lógica de pedidos, autorização por papéis, refresh token, cadastro público e seed de pedidos.
+- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração e criação, consulta, listagem, edição e exclusão lógica de pedidos, com testes unitários/HTTP/de integração.
+- **Ainda não implementado:** autorização por papéis, refresh token, cadastro público e seed de pedidos.
 
-O campo `deletedAt` existe no modelo, mas nenhuma operação aplica soft delete ainda.
+O campo `deletedAt` registra a exclusão lógica. Pedidos excluídos continuam no banco com seus itens, mas não aparecem na consulta individual nem na listagem.
 
 ## Modelagem inicial
 
@@ -16,7 +16,7 @@ O campo `deletedAt` existe no modelo, mas nenhuma operação aplica soft delete 
 - `expectedDeliveryDate` é `DATE`, pois representa um dia de calendário. Datas de criação, atualização e exclusão usam `TIMESTAMPTZ(3)`.
 - `OrderItem.price` usa `DECIMAL(12,2)`, com precisão fixa para valores monetários. Não há quantidade, frete nem total nesta etapa.
 - A chave estrangeira de `OrderItem.orderId` tem índice para buscar os itens de um pedido. O status pode ser filtrado, mas não recebe índice adicional sem evidência de volume e perfil de consulta; índices únicos de e-mail e número do pedido decorrem das próprias restrições de unicidade.
-- Exclusão física de um pedido apaga seus itens por `ON DELETE CASCADE`. Isso não implementa soft delete: preencher `deletedAt` futuramente não apaga nem oculta dados por si só.
+- Exclusão física de um pedido apaga seus itens por `ON DELETE CASCADE`. A API usa exclusão lógica: preencher `deletedAt` não apaga o pedido nem seus itens.
 
 ## Pré-requisitos
 
@@ -82,13 +82,13 @@ $headers = @{ Authorization = "Bearer $($login.accessToken)" }
 
 Use `$headers` nas rotas protegidas de pedidos descritas abaixo.
 
-O token usa HS256, inclui o identificador do usuário em `sub` e expira em 15 minutos. Envie-o como `Authorization: Bearer <JWT>` às rotas que forem protegidas por `JwtAuthGuard`. As duas rotas de pedidos abaixo exigem esse token válido.
+O token usa HS256, inclui o identificador do usuário em `sub` e expira em 15 minutos. Envie-o como `Authorization: Bearer <JWT>` às rotas que forem protegidas por `JwtAuthGuard`. Todas as rotas de pedidos abaixo exigem esse token válido.
 
 Usuário inexistente e senha incorreta retornam a mesma resposta genérica `401 Unauthorized`. Senha acima de 72 bytes UTF-8 retorna `400 Bad Request` antes da consulta ou comparação. O hash da senha nunca é retornado.
 
 ## Pedidos
 
-As rotas disponíveis são `POST /orders`, `GET /orders/:id` e `GET /orders`. Todas exigem `Authorization: Bearer <JWT>`.
+As rotas disponíveis são `POST /orders`, `GET /orders/:id`, `GET /orders`, `PATCH /orders/:id` e `DELETE /orders/:id`. Todas exigem `Authorization: Bearer <JWT>`.
 
 ### Criar pedido
 
@@ -239,6 +239,31 @@ Resposta `200 OK`:
 
 Os resultados são ordenados por `createdAt` decrescente e, em caso de empate, por `id` decrescente. Uma página além da última retorna `data: []`, mantendo `total` e `totalPages`; sem resultados, `totalPages` é `0`. A busca e a contagem usam o mesmo filtro, mas são consultas separadas e não prometem um snapshot transacional comum.
 
+### Atualizar pedido
+
+`PATCH /orders/:id` aceita atualização parcial dos campos `orderNumber`, `status`, `expectedDeliveryDate`, `customer`, `deliveryAddress` e `items`. Exemplo:
+
+```json
+{
+  "status": "PROCESSING",
+  "customer": { "name": "Ada Lovelace atualizada" },
+  "deliveryAddress": { "complement": null },
+  "items": [{ "description": "Item substituto", "price": "12.30" }]
+}
+```
+
+Envie ao menos um campo. Os campos enviados em `customer` e `deliveryAddress` são atualizados individualmente; os omitidos permanecem como estavam. Objetos aninhados vazios e campos desconhecidos são rejeitados. `deliveryAddress.complement` aceita `null` para remover o complemento; os outros campos não anuláveis rejeitam `null`. As mesmas regras de data, status, texto e preço da criação são aplicadas.
+
+Se `items` for omitido, os itens atuais são preservados. Se for enviado, deve conter ao menos um item válido e substitui a lista inteira. Os itens novos recebem novos IDs; os IDs anteriores não são preservados. A atualização dos campos do pedido e a substituição dos itens ocorrem na mesma transação, portanto a falha ao criar um novo item reverte também a exclusão dos itens anteriores e as demais alterações.
+
+A escrita do PATCH é condicional a `deletedAt: null` e ocorre dentro da transação que atualiza os itens. O teste de integração controla o caso em que uma exclusão mantém primeiro o bloqueio da linha: o PATCH aguarda, a condição é reavaliada após a exclusão confirmar e o PATCH retorna `404` sem alterar o pedido. Isso comprova esse cenário de serialização no PostgreSQL; a ordem inversa e outras regras de concorrência ou transição de status não foram testadas nem são definidas aqui.
+
+Resposta `200 OK`: o pedido atualizado no mesmo formato de `GET /orders/:id`. UUID inválido retorna `400`; pedido inexistente ou já excluído retorna `404`; `orderNumber` em conflito retorna `409`.
+
+### Excluir pedido
+
+`DELETE /orders/:id` preenche `deletedAt` sem remover fisicamente o pedido ou seus itens. A primeira exclusão retorna `204 No Content`, sem corpo; pedido inexistente ou já excluído retorna `404`. Pedidos excluídos deixam de aparecer em `GET /orders` e `GET /orders/:id` e não podem ser atualizados. O número continua reservado pela restrição única, mesmo após a exclusão lógica.
+
 ### Erros das rotas
 
 - `400 Bad Request`: corpo ou filtro inválido, data impossível, período invertido, preço inválido, parâmetros/campos desconhecidos ou UUID malformado.
@@ -260,8 +285,8 @@ Se o usuário já existia e a senha configurada não corresponde à senha armaze
 - `npm run db:seed`: cria o usuário local de demonstração somente se o e-mail ainda não existir.
 - `npm run db:status`: consulta o estado das migrations.
 - `npm run lint`: verifica o código TypeScript em `src/` e `test/`.
-- `npm test` e `npm run test:e2e`: executam testes unitários e HTTP com módulo Nest e Prisma mockado; não usam o banco principal nem executam o seed.
-- `npm run test:integration`: executa testes HTTP contra PostgreSQL real. Exige `TEST_DATABASE_URL` apontando para uma base isolada chamada `naporta_orders_test_<sufixo>`; a suíte valida o nome e confirma a base conectada. Antes, configure `DATABASE_URL` com a mesma URL e aplique `npm run db:migrate:deploy`. Os testes removem somente os pedidos criados com o prefixo da própria execução; não removem banco, volume ou container.
+- `npm test` e `npm run test:e2e`: executam testes unitários e HTTP com módulo Nest e Prisma mockado; não usam o banco principal nem executam o seed. Incluem os testes das rotas de criação, consulta, listagem, atualização e exclusão lógica.
+- `npm run test:integration`: executa testes HTTP contra PostgreSQL real, incluindo atomicidade da substituição de itens, exclusão lógica persistente e concorrência controlada entre PATCH e exclusão. Exige `TEST_DATABASE_URL` apontando para uma base isolada chamada `naporta_orders_test_<sufixo>`; a suíte valida o nome e confirma a base conectada. Antes, configure `DATABASE_URL` com a mesma URL e aplique `npm run db:migrate:deploy`. Os testes removem somente os pedidos criados com o prefixo da própria execução; não removem banco, volume ou container.
 - `npm run build`: gera o client e compila a aplicação.
 
 Para parar o container, execute `docker compose down`. Isso mantém os dados no volume. Remover o volume, por exemplo com `docker compose down -v`, apaga os dados locais.

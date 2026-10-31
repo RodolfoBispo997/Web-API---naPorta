@@ -116,7 +116,7 @@ class DeliveryAddressDto {
   country!: string;
 }
 
-class CreateOrderItemDto {
+export class CreateOrderItemDto {
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()

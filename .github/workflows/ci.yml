@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: naporta_orders_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user -d naporta_orders_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://ci_user:ci_password@127.0.0.1:5432/naporta_orders_test_ci?schema=public
+      TEST_DATABASE_URL: postgresql://ci_user:ci_password@127.0.0.1:5432/naporta_orders_test_ci?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12.0'
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:e2e
+      - run: npm run db:migrate:deploy
+      - run: npm run test:integration
+      - run: npx tsc --noEmit --incremental false
+      - run: npm run build

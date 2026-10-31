@@ -297,6 +297,10 @@ O seed pode ser repetido: se um número já existir, não modifica nem apaga o p
 
 Cada pedido e seus itens são criados em uma escrita aninhada atômica. A lista inteira e o usuário não formam uma única transação: se ocorrer falha após alguns pedidos, os pedidos concluídos permanecem; uma execução posterior os conta como existentes e tenta criar os números que faltarem. Outros erros de banco são propagados e fazem o comando terminar com código diferente de zero; uma disputa concorrente é tratada como existência somente quando o erro identifica a restrição única de `order_number` e a linha conflitante é encontrada.
 
+## Integração contínua
+
+O workflow [CI](.github/workflows/ci.yml) é executado em pushes e pull requests. Ele instala as dependências com `npm ci`, gera o Prisma Client, executa lint, testes unitários e HTTP, aplica as migrations versionadas a um PostgreSQL temporário e executa os testes de integração, a verificação de tipos e o build. Não realiza deploy. O workflow usa Node 22.12.0; a versão efetivamente testada localmente é a indicada nos pré-requisitos acima.
+
 ## Migrations e comandos
 
 - `npm run prisma:generate`: gera o Prisma Client.

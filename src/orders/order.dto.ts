@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -57,12 +58,24 @@ class CustomerDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
+  @ApiProperty({
+    type: String,
+    maxLength: 200,
+    minLength: 1,
+    example: 'Cliente Fictício',
+  })
   name!: string;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(40)
+  @ApiProperty({
+    type: String,
+    maxLength: 40,
+    minLength: 1,
+    example: 'DOC-DEMO-001',
+  })
   document!: string;
 }
 
@@ -71,12 +84,19 @@ class DeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
+  @ApiProperty({
+    type: String,
+    maxLength: 200,
+    minLength: 1,
+    example: 'Rua Exemplo',
+  })
   street!: string;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(40)
+  @ApiProperty({ type: String, maxLength: 40, minLength: 1, example: '10' })
   number!: string;
 
   @Transform(trimText)
@@ -84,36 +104,63 @@ class DeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: 120,
+    minLength: 1,
+    example: 'Sala 2',
+  })
   complement?: string | null;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiProperty({
+    type: String,
+    maxLength: 120,
+    minLength: 1,
+    example: 'Bairro Exemplo',
+  })
   neighborhood!: string;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiProperty({
+    type: String,
+    maxLength: 120,
+    minLength: 1,
+    example: 'Cidade Fictícia',
+  })
   city!: string;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiProperty({ type: String, maxLength: 120, minLength: 1, example: 'SP' })
   state!: string;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(32)
+  @ApiProperty({
+    type: String,
+    maxLength: 32,
+    minLength: 1,
+    example: '00000-000',
+  })
   postalCode!: string;
 
   @Transform(trimText)
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiProperty({ type: String, maxLength: 120, minLength: 1, example: 'BR' })
   country!: string;
 }
 
@@ -122,12 +169,25 @@ export class CreateOrderItemDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(500)
+  @ApiProperty({
+    type: String,
+    minLength: 1,
+    maxLength: 500,
+    example: 'Produto fictício',
+  })
   description!: string;
 
   @IsString()
   @Matches(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/, {
     message:
       'price must be a non-negative decimal string with at most 10 integer digits and 2 fractional digits.',
+  })
+  @ApiProperty({
+    type: String,
+    pattern: '^(?:0|[1-9]\\d{0,9})(?:\\.\\d{1,2})?$',
+    example: '12.30',
+    description:
+      'String decimal não negativa, até 10 dígitos inteiros e 2 casas decimais.',
   })
   price!: string;
 }
@@ -137,28 +197,43 @@ export class CreateOrderDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(64)
+  @ApiProperty({
+    type: String,
+    minLength: 1,
+    maxLength: 64,
+    example: 'PEDIDO-FICTICIO-001',
+  })
   orderNumber!: string;
 
   @IsString()
   @Validate(RealCalendarDateConstraint)
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    example: '2026-12-31',
+    description: 'Data de calendário real em YYYY-MM-DD.',
+  })
   expectedDeliveryDate!: string;
 
   @IsDefined()
   @IsObject()
   @ValidateNested()
   @Type(() => CustomerDto)
+  @ApiProperty({ type: () => CustomerDto })
   customer!: CustomerDto;
 
   @IsDefined()
   @IsObject()
   @ValidateNested()
   @Type(() => DeliveryAddressDto)
+  @ApiProperty({ type: () => DeliveryAddressDto })
   deliveryAddress!: DeliveryAddressDto;
 
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
+  @ApiProperty({ type: () => [CreateOrderItemDto], minItems: 1 })
   items!: CreateOrderItemDto[];
 }
 

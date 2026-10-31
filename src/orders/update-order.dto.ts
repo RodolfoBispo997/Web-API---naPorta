@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -41,6 +42,12 @@ export class UpdateCustomerDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 200,
+    example: 'Cliente Fictício Atualizado',
+  })
   name?: string;
 
   @Transform(trimText)
@@ -48,6 +55,12 @@ export class UpdateCustomerDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(40)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 40,
+    example: 'DOC-DEMO-001',
+  })
   document?: string;
 }
 
@@ -57,6 +70,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(200)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 200,
+    example: 'Rua Exemplo',
+  })
   street?: string;
 
   @Transform(trimText)
@@ -64,6 +83,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(40)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 40,
+    example: '10',
+  })
   number?: string;
 
   @Transform(trimText)
@@ -71,6 +96,14 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    minLength: 1,
+    maxLength: 120,
+    example: null,
+    description: 'null remove o complemento.',
+  })
   complement?: string | null;
 
   @Transform(trimText)
@@ -78,6 +111,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 120,
+    example: 'Bairro Exemplo',
+  })
   neighborhood?: string;
 
   @Transform(trimText)
@@ -85,6 +124,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 120,
+    example: 'Cidade Fictícia',
+  })
   city?: string;
 
   @Transform(trimText)
@@ -92,6 +137,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 120,
+    example: 'SP',
+  })
   state?: string;
 
   @Transform(trimText)
@@ -99,6 +150,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(32)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 32,
+    example: '00000-000',
+  })
   postalCode?: string;
 
   @Transform(trimText)
@@ -106,6 +163,12 @@ export class UpdateDeliveryAddressDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 120,
+    example: 'BR',
+  })
   country?: string;
 }
 
@@ -115,15 +178,23 @@ export class UpdateOrderDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(64)
+  @ApiPropertyOptional({
+    type: String,
+    minLength: 1,
+    maxLength: 64,
+    example: 'PEDIDO-FICTICIO-001',
+  })
   orderNumber?: string;
 
   @ValidateIf((_object, value) => value !== undefined)
   @IsEnum(OrderStatus)
+  @ApiPropertyOptional({ enum: OrderStatus, example: 'PROCESSING' })
   status?: OrderStatus;
 
   @ValidateIf((_object, value) => value !== undefined)
   @IsString()
   @Validate(RealCalendarDateConstraint)
+  @ApiPropertyOptional({ type: String, format: 'date', example: '2026-12-31' })
   expectedDeliveryDate?: string;
 
   @ValidateIf((_object, value) => value !== undefined)
@@ -131,6 +202,10 @@ export class UpdateOrderDto {
   @Validate(NonEmptyPatchObjectConstraint)
   @ValidateNested()
   @Type(() => UpdateCustomerDto)
+  @ApiPropertyOptional({
+    type: () => UpdateCustomerDto,
+    description: 'Informe ao menos um campo.',
+  })
   customer?: UpdateCustomerDto;
 
   @ValidateIf((_object, value) => value !== undefined)
@@ -138,6 +213,10 @@ export class UpdateOrderDto {
   @Validate(NonEmptyPatchObjectConstraint)
   @ValidateNested()
   @Type(() => UpdateDeliveryAddressDto)
+  @ApiPropertyOptional({
+    type: () => UpdateDeliveryAddressDto,
+    description: 'Informe ao menos um campo; somente complement aceita null.',
+  })
   deliveryAddress?: UpdateDeliveryAddressDto;
 
   @ValidateIf((_object, value) => value !== undefined)
@@ -145,5 +224,10 @@ export class UpdateOrderDto {
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
+  @ApiPropertyOptional({
+    type: () => [CreateOrderItemDto],
+    minItems: 1,
+    description: 'Quando informado, substitui todos os itens existentes.',
+  })
   items?: CreateOrderItemDto[];
 }

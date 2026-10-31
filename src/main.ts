@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { resolveListenHost } from './listen-host.js';
+import { setupSwagger } from './swagger.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,6 +14,10 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  await app.listen(process.env.PORT ?? 3000, resolveListenHost(process.env.HOST));
+  setupSwagger(app);
+  await app.listen(
+    process.env.PORT ?? 3000,
+    resolveListenHost(process.env.HOST),
+  );
 }
 await bootstrap();

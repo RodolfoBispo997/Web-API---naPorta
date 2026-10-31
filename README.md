@@ -53,6 +53,8 @@ Os comandos Prisma exigem `DATABASE_URL` configurada. `prisma generate` e `prism
 
 ## Autenticação
 
+A documentação interativa está disponível em `http://127.0.0.1:3000/docs` (ajuste host e porta se configurados). No Swagger, execute `POST /auth/login` com o usuário de demonstração configurado e copie o valor de `accessToken` retornado. Em **Authorize**, informe esse token para chamar as rotas de pedidos. O documento OpenAPI também está disponível em `/docs-json`.
+
 `POST /auth/login` recebe e-mail e senha. O e-mail é removido de espaços nas extremidades e convertido para minúsculas. O login valida formato e limites de entrada, mas não impõe regras de complexidade à senha. A senha pode ter até 72 bytes UTF-8, que é o limite do bcrypt. Senhas maiores recebem `400 Bad Request` com a mensagem `Password must be no longer than 72 UTF-8 bytes.` A contagem considera os bytes UTF-8, inclusive para caracteres multibyte. Isso impede que um sufixo além do limite seja ignorado pelo bcrypt.
 
 Requisição:

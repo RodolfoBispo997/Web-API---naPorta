@@ -231,6 +231,23 @@ describe('orders HTTP routes', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { nestedItem: [] },
+    { nestedItem: [{ description: 'Produto', price: '1.00' }] },
+  ])(
+    'rejects a nested array as an item in POST before calling Prisma: $nestedItem',
+    async ({ nestedItem }) => {
+      await request(app.getHttpServer())
+        .post('/orders')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...input, items: [nestedItem] })
+        .expect(400);
+      expect(create).not.toHaveBeenCalled();
+      expect(findFirst).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects empty items and unknown fields at nested levels', async () => {
     await request(app.getHttpServer())
       .post('/orders')
@@ -451,13 +468,21 @@ describe('orders HTTP routes', () => {
     await request(app.getHttpServer())
       .patch(`/orders/${orderId}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ items: [{ description: ' New item ', price: '12.30' }] })
+      .send({
+        items: [
+          { description: ' New item ', price: '12.30' },
+          { description: ' Other item ', price: '1.00' },
+        ],
+      })
       .expect(200);
     expect(itemDeleteMany).toHaveBeenCalledWith({
       where: { orderId },
     });
     expect(itemCreateMany).toHaveBeenCalledWith({
-      data: [{ orderId, description: 'New item', price: '12.30' }],
+      data: [
+        { orderId, description: 'New item', price: '12.30' },
+        { orderId, description: 'Other item', price: '1.00' },
+      ],
     });
   });
 
@@ -473,6 +498,25 @@ describe('orders HTTP routes', () => {
         status,
         updatedAt: expect.any(Date),
       });
+    },
+  );
+
+  it.each([
+    { nestedItem: [] },
+    { nestedItem: [{ description: 'Produto', price: '1.00' }] },
+  ])(
+    'rejects a nested array as an item in PATCH before calling Prisma: $nestedItem',
+    async ({ nestedItem }) => {
+      await request(app.getHttpServer())
+        .patch(`/orders/${orderId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ items: [nestedItem] })
+        .expect(400);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(findFirst).not.toHaveBeenCalled();
+      expect(updateMany).not.toHaveBeenCalled();
+      expect(itemDeleteMany).not.toHaveBeenCalled();
+      expect(itemCreateMany).not.toHaveBeenCalled();
     },
   );
 

@@ -222,6 +222,7 @@ export class UpdateOrderDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsArray()
   @ArrayMinSize(1)
+  @IsObject({ each: true })
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
   @ApiPropertyOptional({

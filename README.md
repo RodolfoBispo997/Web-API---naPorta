@@ -4,8 +4,8 @@ API NestJS para gerenciamento de pedidos, construída em etapas.
 
 ## Estado atual
 
-- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração e testes unitários/HTTP de autenticação.
-- **Ainda não implementado:** endpoints e serviços de pedidos, autorização por papéis, refresh token, cadastro público, exclusão lógica aplicada às consultas e seed de pedidos.
+- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração, criação e consulta individual de pedidos e testes unitários/HTTP/de integração.
+- **Ainda não implementado:** listagem, edição, exclusão lógica de pedidos, autorização por papéis, refresh token, cadastro público e seed de pedidos.
 
 O campo `deletedAt` existe no modelo, mas nenhuma operação aplica soft delete ainda.
 
@@ -80,11 +80,117 @@ $login = Invoke-RestMethod -Method Post -Uri http://localhost:3000/auth/login `
 $headers = @{ Authorization = "Bearer $($login.accessToken)" }
 ```
 
-Use `$headers` ao chamar uma rota futura protegida pelo guard. Ainda não existe endpoint de pedidos.
+Use `$headers` nas rotas protegidas de pedidos descritas abaixo.
 
-O token usa HS256, inclui o identificador do usuário em `sub` e expira em 15 minutos. Envie-o como `Authorization: Bearer <JWT>` às rotas que forem protegidas por `JwtAuthGuard`. Um módulo de rotas importa `AuthModule` e registra `JwtAuthGuard` nos próprios `providers`; ainda não há rota protegida de pedidos na aplicação.
+O token usa HS256, inclui o identificador do usuário em `sub` e expira em 15 minutos. Envie-o como `Authorization: Bearer <JWT>` às rotas que forem protegidas por `JwtAuthGuard`. As duas rotas de pedidos abaixo exigem esse token válido.
 
 Usuário inexistente e senha incorreta retornam a mesma resposta genérica `401 Unauthorized`. Senha acima de 72 bytes UTF-8 retorna `400 Bad Request` antes da consulta ou comparação. O hash da senha nunca é retornado.
+
+## Pedidos
+
+As rotas implementadas nesta etapa são `POST /orders` e `GET /orders/:id`. Ambas exigem `Authorization: Bearer <JWT>`.
+
+### Criar pedido
+
+Exemplo de `POST /orders`:
+
+```json
+{
+  "orderNumber": "ORD-2026-001",
+  "expectedDeliveryDate": "2026-12-31",
+  "customer": {
+    "name": "Ada Lovelace",
+    "document": "DOC-123"
+  },
+  "deliveryAddress": {
+    "street": "Rua das Flores",
+    "number": "42",
+    "neighborhood": "Centro",
+    "city": "Campinas",
+    "state": "SP",
+    "postalCode": "13000-000",
+    "country": "BR",
+    "complement": "Sala 2"
+  },
+  "items": [
+    { "description": "Caixa pequena", "price": "19.90" },
+    { "description": "Envelope", "price": "0" }
+  ]
+}
+```
+
+Resposta `201 Created` (IDs e horários são ilustrativos):
+
+```json
+{
+  "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f86",
+  "orderNumber": "ORD-2026-001",
+  "status": "PENDING",
+  "expectedDeliveryDate": "2026-12-31",
+  "customer": { "name": "Ada Lovelace", "document": "DOC-123" },
+  "deliveryAddress": {
+    "street": "Rua das Flores",
+    "number": "42",
+    "complement": "Sala 2",
+    "neighborhood": "Centro",
+    "city": "Campinas",
+    "state": "SP",
+    "postalCode": "13000-000",
+    "country": "BR"
+  },
+  "items": [
+    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f87", "description": "Caixa pequena", "price": "19.90" },
+    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f88", "description": "Envelope", "price": "0.00" }
+  ],
+  "createdAt": "2026-10-31T14:00:00.000Z",
+  "updatedAt": "2026-10-31T14:00:00.000Z"
+}
+```
+
+`expectedDeliveryDate` deve ser uma data real no formato `YYYY-MM-DD`; é armazenada como `DATE`, sem conversão por fuso horário, e não precisa estar no futuro. `price` deve ser texto decimal não negativo, com até 10 dígitos inteiros e até 2 casas decimais, compatível com `DECIMAL(12,2)`. A resposta sempre usa uma string com exatamente duas casas decimais, por exemplo `"0.00"` e `"19.90"`. Os preços são enviados ao Prisma como texto e não passam por ponto flutuante.
+
+Textos são aparados nas extremidades e não podem ficar vazios. Os limites de comprimento seguem o schema Prisma; campos desconhecidos, inclusive nos objetos aninhados, são rejeitados. O status inicial é sempre `PENDING`; o cliente não pode definir status, identificadores ou timestamps.
+
+A criação usa uma escrita aninhada do Prisma para inserir o pedido e todos os itens na mesma operação transacional. Se a gravação de um item falhar, o pedido também é revertido. O índice único PostgreSQL de `order_number` resolve disputas concorrentes; somente a violação dessa restrição é convertida em `409 Conflict`.
+
+### Consultar pedido
+
+Exemplo de requisição: `GET /orders/c0290cbd-33d9-44bb-9bad-6d194e0c2f86`, com o cabeçalho Bearer mostrado na seção de autenticação. Exemplo de resposta `200 OK` (valores ilustrativos):
+
+```json
+{
+  "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f86",
+  "orderNumber": "ORD-2026-001",
+  "status": "PENDING",
+  "expectedDeliveryDate": "2026-12-31",
+  "customer": { "name": "Ada Lovelace", "document": "DOC-123" },
+  "deliveryAddress": {
+    "street": "Rua das Flores",
+    "number": "42",
+    "complement": "Sala 2",
+    "neighborhood": "Centro",
+    "city": "Campinas",
+    "state": "SP",
+    "postalCode": "13000-000",
+    "country": "BR"
+  },
+  "items": [
+    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f87", "description": "Caixa pequena", "price": "19.90" },
+    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f88", "description": "Envelope", "price": "0.00" }
+  ],
+  "createdAt": "2026-10-31T14:00:00.000Z",
+  "updatedAt": "2026-10-31T14:00:00.000Z"
+}
+```
+
+UUID inválido retorna `400 Bad Request`; pedido inexistente ou com `deletedAt` preenchido retorna `404 Not Found`.
+
+### Erros das rotas
+
+- `400 Bad Request`: corpo inválido, data impossível, preço inválido, campos desconhecidos ou UUID malformado.
+- `401 Unauthorized`: token ausente, inválido ou expirado.
+- `404 Not Found`: pedido inexistente ou marcado como excluído logicamente.
+- `409 Conflict`: `orderNumber` já utilizado.
 
 ## Usuário de demonstração
 
@@ -101,6 +207,7 @@ Se o usuário já existia e a senha configurada não corresponde à senha armaze
 - `npm run db:status`: consulta o estado das migrations.
 - `npm run lint`: verifica o código TypeScript em `src/` e `test/`.
 - `npm test` e `npm run test:e2e`: executam testes unitários e HTTP com módulo Nest e Prisma mockado; não usam o banco principal nem executam o seed.
+- `npm run test:integration`: executa testes HTTP contra PostgreSQL real. Exige `TEST_DATABASE_URL` apontando para uma base isolada chamada `naporta_orders_test_<sufixo>`; a suíte valida o nome e confirma a base conectada. Antes, configure `DATABASE_URL` com a mesma URL e aplique `npm run db:migrate:deploy`. Os testes removem somente os pedidos criados com o prefixo da própria execução; não removem banco, volume ou container.
 - `npm run build`: gera o client e compila a aplicação.
 
 Para parar o container, execute `docker compose down`. Isso mantém os dados no volume. Remover o volume, por exemplo com `docker compose down -v`, apaga os dados locais.

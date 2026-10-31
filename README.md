@@ -51,6 +51,41 @@ Configure `DATABASE_URL`, `JWT_SECRET`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD`
 
 Os comandos Prisma exigem `DATABASE_URL` configurada. `prisma generate` e `prisma validate` não precisam de uma conexão ativa com o banco.
 
+### API e PostgreSQL com Docker Compose
+
+Como alternativa à execução local da API, copie `.env.example` para `.env`
+se ainda não existir. Se já existir, preserve-o e acrescente as variáveis
+`DOCKER_DATABASE_URL` e `API_PORT` se necessário. A URL para o container usa
+o host `postgres` e a porta interna `5432`; usuário, senha e banco devem
+coincidir com `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB`. Caracteres
+reservados em credenciais de URL devem ser codificados. Configure também
+`JWT_SECRET`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD` no `.env`; os valores
+de exemplo destinam-se apenas à demonstração local.
+
+Na raiz do projeto, execute:
+
+```bash
+docker compose up -d --wait postgres
+docker compose build api
+docker compose run --rm api npm run db:migrate:deploy
+docker compose run --rm api npm run db:seed
+docker compose --profile api up -d api
+```
+
+O primeiro comando aguarda o PostgreSQL ficar saudável. Execute a migration
+versionada antes de iniciar ou usar a API; ela não é aplicada automaticamente.
+O seed é explícito e pode ser repetido sem sobrescrever usuários ou pedidos
+existentes. O perfil `api` mantém `docker compose up -d --wait` disponível
+para o fluxo local apenas com PostgreSQL. A API no container escuta em
+`0.0.0.0`, mas sua porta é publicada apenas em `127.0.0.1`, por padrão
+`3000`; altere `API_PORT` se estiver ocupada. O PostgreSQL continua publicado
+no loopback por `POSTGRES_PORT`. A imagem inclui dependências de desenvolvimento
+para que os comandos Prisma e seed funcionem.
+
+Para interromper e remover os containers e a rede do projeto, preservando o
+volume do banco, execute `docker compose --profile api down`. Não use a
+configuração demonstrativa como configuração de produção.
+
 ## Autenticação
 
 A documentação interativa está disponível em `http://127.0.0.1:3000/docs` (ajuste host e porta se configurados). No Swagger, execute `POST /auth/login` com o usuário de demonstração configurado e copie o valor de `accessToken` retornado. Em **Authorize**, informe esse token para chamar as rotas de pedidos. O documento OpenAPI também está disponível em `/docs-json`.

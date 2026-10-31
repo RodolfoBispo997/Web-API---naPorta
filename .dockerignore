@@ -1,0 +1,13 @@
+.git
+.env*
+node_modules
+dist
+build
+coverage
+src/generated/prisma
+*.tsbuildinfo
+*.log
+.cache
+.codex
+.agents
+.aws

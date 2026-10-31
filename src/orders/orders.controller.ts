@@ -5,10 +5,12 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CreateOrderDto } from './order.dto.js';
+import { ListOrdersQueryDto } from './list-orders-query.dto.js';
 import { OrdersService } from './orders.service.js';
 
 @Controller('orders')
@@ -19,6 +21,11 @@ export class OrdersController {
   @Post()
   create(@Body() input: CreateOrderDto) {
     return this.ordersService.create(input);
+  }
+
+  @Get()
+  findMany(@Query() query: ListOrdersQueryDto) {
+    return this.ordersService.findMany(query);
   }
 
   @Get(':id')

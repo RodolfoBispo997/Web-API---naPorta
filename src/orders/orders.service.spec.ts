@@ -63,14 +63,18 @@ function makeOrder() {
 describe('OrdersService', () => {
   const create = vi.fn();
   const findFirst = vi.fn();
+  const findMany = vi.fn();
+  const count = vi.fn();
   let service: OrdersService;
 
   beforeEach(() => {
     vi.clearAllMocks();
     create.mockResolvedValue(makeOrder());
     findFirst.mockResolvedValue(makeOrder());
+    findMany.mockResolvedValue([makeOrder()]);
+    count.mockResolvedValue(1);
     service = new OrdersService({
-      order: { create, findFirst },
+      order: { create, findFirst, findMany, count },
     } as unknown as PrismaService);
   });
 
@@ -146,5 +150,95 @@ describe('OrdersService', () => {
     await expect(service.findOne('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('lists active orders with defaults, a shared filter, and stable pagination', async () => {
+    const response = await service.findMany({ page: 1, limit: 20 });
+    const where = findMany.mock.calls[0][0].where;
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { deletedAt: null },
+      include: { items: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: 0,
+      take: 20,
+    });
+    expect(count).toHaveBeenCalledWith({ where });
+    expect(response.data).toHaveLength(1);
+    expect(response.meta).toEqual({
+      page: 1,
+      limit: 20,
+      total: 1,
+      totalPages: 1,
+    });
+  });
+
+  it('combines exact text, status, and UTC date boundaries with AND', async () => {
+    await service.findMany({
+      orderNumber: 'ORD-100',
+      status: 'PROCESSING',
+      startDate: '2024-02-29',
+      endDate: '2024-03-01',
+      page: 3,
+      limit: 2,
+    });
+    const where = findMany.mock.calls[0][0].where;
+    expect(where).toEqual({
+      deletedAt: null,
+      AND: [
+        { orderNumber: 'ORD-100' },
+        { status: 'PROCESSING' },
+        {
+          createdAt: {
+            gte: new Date('2024-02-29T00:00:00.000Z'),
+            lt: new Date('2024-03-02T00:00:00.000Z'),
+          },
+        },
+      ],
+    });
+    expect(findMany.mock.calls[0][0]).toMatchObject({ skip: 4, take: 2 });
+    expect(count).toHaveBeenCalledWith({ where });
+  });
+
+  it.each([
+    [
+      'startDate only',
+      { startDate: '2026-12-31' },
+      {
+        gte: new Date('2026-12-31T00:00:00.000Z'),
+      },
+    ],
+    [
+      'endDate only',
+      { endDate: '2026-12-31' },
+      {
+        lt: new Date('2027-01-01T00:00:00.000Z'),
+      },
+    ],
+  ])(
+    'supports %s without local time-zone conversion',
+    async (_name, filters, bounds) => {
+      await service.findMany({ ...filters, page: 1, limit: 20 });
+      expect(findMany.mock.calls[0][0].where.AND).toEqual([
+        { createdAt: bounds },
+      ]);
+    },
+  );
+
+  it('returns no pages for an empty result and preserves the requested out-of-range page', async () => {
+    findMany.mockResolvedValueOnce([]);
+    count.mockResolvedValueOnce(0);
+    await expect(service.findMany({ page: 8, limit: 5 })).resolves.toEqual({
+      data: [],
+      meta: { page: 8, limit: 5, total: 0, totalPages: 0 },
+    });
+    findMany.mockResolvedValueOnce([]);
+    count.mockResolvedValueOnce(11);
+    await expect(
+      service.findMany({ page: 4, limit: 5 }),
+    ).resolves.toMatchObject({
+      data: [],
+      meta: { page: 4, limit: 5, total: 11, totalPages: 3 },
+    });
   });
 });

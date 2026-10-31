@@ -4,7 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import type { CreateOrderDto } from './order.dto.js';
+import type { ListOrdersQueryDto } from './list-orders-query.dto.js';
 import { toOrderResponse, type OrderResponse } from './order-response.js';
 
 function isOrderNumberUniqueViolation(error: unknown): boolean {
@@ -90,5 +92,53 @@ export class OrdersService {
     });
     if (!order) throw new NotFoundException('Order not found.');
     return toOrderResponse(order);
+  }
+
+  async findMany(query: ListOrdersQueryDto) {
+    const clauses: Prisma.OrderWhereInput[] = [];
+    if (query.orderNumber !== undefined) {
+      clauses.push({ orderNumber: query.orderNumber });
+    }
+    if (query.status !== undefined) clauses.push({ status: query.status });
+
+    const createdAt: Prisma.DateTimeFilter = {};
+    if (query.startDate !== undefined) {
+      createdAt.gte = parseDateOnly(query.startDate);
+    }
+    if (query.endDate !== undefined) {
+      const exclusiveEnd = parseDateOnly(query.endDate);
+      exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+      createdAt.lt = exclusiveEnd;
+    }
+    if (query.startDate !== undefined || query.endDate !== undefined) {
+      clauses.push({ createdAt });
+    }
+
+    const where: Prisma.OrderWhereInput = {
+      deletedAt: null,
+      ...(clauses.length > 0 ? { AND: clauses } : {}),
+    };
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        include: { items: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      data: orders.map(toOrderResponse),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / limit),
+      },
+    };
   }
 }

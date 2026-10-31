@@ -4,8 +4,8 @@ API NestJS para gerenciamento de pedidos, construída em etapas.
 
 ## Estado atual
 
-- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração, criação e consulta individual de pedidos e testes unitários/HTTP/de integração.
-- **Ainda não implementado:** listagem, edição, exclusão lógica de pedidos, autorização por papéis, refresh token, cadastro público e seed de pedidos.
+- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração, criação, consulta individual e listagem paginada de pedidos e testes unitários/HTTP/de integração.
+- **Ainda não implementado:** edição, exclusão lógica de pedidos, autorização por papéis, refresh token, cadastro público e seed de pedidos.
 
 O campo `deletedAt` existe no modelo, mas nenhuma operação aplica soft delete ainda.
 
@@ -88,7 +88,7 @@ Usuário inexistente e senha incorreta retornam a mesma resposta genérica `401 
 
 ## Pedidos
 
-As rotas implementadas nesta etapa são `POST /orders` e `GET /orders/:id`. Ambas exigem `Authorization: Bearer <JWT>`.
+As rotas disponíveis são `POST /orders`, `GET /orders/:id` e `GET /orders`. Todas exigem `Authorization: Bearer <JWT>`.
 
 ### Criar pedido
 
@@ -185,9 +185,63 @@ Exemplo de requisição: `GET /orders/c0290cbd-33d9-44bb-9bad-6d194e0c2f86`, com
 
 UUID inválido retorna `400 Bad Request`; pedido inexistente ou com `deletedAt` preenchido retorna `404 Not Found`.
 
+### Listar pedidos
+
+`GET /orders` retorna somente pedidos com `deletedAt: null`, incluindo os itens no mesmo formato de `GET /orders/:id`. Todos os filtros informados são combinados com AND:
+
+| Parâmetro | Tipo e regra | Padrão |
+| --- | --- | --- |
+| `orderNumber` | Texto, correspondência exata; espaços externos são removidos | sem filtro |
+| `status` | `PENDING`, `PROCESSING`, `DELIVERED` ou `CANCELLED` | sem filtro |
+| `startDate` | Data real `YYYY-MM-DD`, inclusiva | sem limite inicial |
+| `endDate` | Data real `YYYY-MM-DD`, inclusiva | sem limite final |
+| `page` | Inteiro entre 1 e 10.000 | `1` |
+| `limit` | Inteiro entre 1 e 100 | `20` |
+
+O intervalo considera `createdAt` em UTC: `startDate` começa à meia-noite inclusiva e `endDate` termina antes da meia-noite do dia seguinte, portanto inclui o dia final completo. É permitido informar só uma das datas. Quando ambas forem informadas, `startDate` precisa ser anterior ou igual a `endDate`. Parâmetros desconhecidos, vazios, repetidos (que resultem em arrays), inválidos ou paginação fora dos limites retornam `400 Bad Request`.
+
+Exemplos (todos com o cabeçalho Bearer):
+
+```text
+GET /orders?orderNumber=%20ORD-2026-001%20
+GET /orders?status=PROCESSING
+GET /orders?startDate=2026-01-01
+GET /orders?endDate=2026-01-31
+GET /orders?startDate=2026-01-01&endDate=2026-01-31&page=2&limit=10&status=PROCESSING
+```
+
+Resposta `200 OK`:
+
+```json
+{
+  "data": [
+    {
+      "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f86",
+      "orderNumber": "ORD-2026-001",
+      "status": "PROCESSING",
+      "expectedDeliveryDate": "2026-12-31",
+      "customer": { "name": "Ada Lovelace", "document": "DOC-123" },
+      "deliveryAddress": {
+        "street": "Rua das Flores", "number": "42", "complement": null,
+        "neighborhood": "Centro", "city": "Campinas", "state": "SP",
+        "postalCode": "13000-000", "country": "BR"
+      },
+      "items": [
+        { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f87", "description": "Caixa pequena", "price": "19.90" }
+      ],
+      "createdAt": "2026-01-15T14:00:00.000Z",
+      "updatedAt": "2026-01-15T14:00:00.000Z"
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
+}
+```
+
+Os resultados são ordenados por `createdAt` decrescente e, em caso de empate, por `id` decrescente. Uma página além da última retorna `data: []`, mantendo `total` e `totalPages`; sem resultados, `totalPages` é `0`. A busca e a contagem usam o mesmo filtro, mas são consultas separadas e não prometem um snapshot transacional comum.
+
 ### Erros das rotas
 
-- `400 Bad Request`: corpo inválido, data impossível, preço inválido, campos desconhecidos ou UUID malformado.
+- `400 Bad Request`: corpo ou filtro inválido, data impossível, período invertido, preço inválido, parâmetros/campos desconhecidos ou UUID malformado.
 - `401 Unauthorized`: token ausente, inválido ou expirado.
 - `404 Not Found`: pedido inexistente ou marcado como excluído logicamente.
 - `409 Conflict`: `orderNumber` já utilizado.

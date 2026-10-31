@@ -120,6 +120,46 @@ describe('orders PostgreSQL integration', () => {
     failureConstraintCreated = false;
   }
 
+  async function createOrder(overrides: Record<string, unknown> = {}) {
+    return request(app.getHttpServer())
+      .post('/orders')
+      .set('Authorization', authorizationHeader())
+      .send(validOrder(overrides))
+      .expect(201);
+  }
+
+  async function findUnusedUtcDay(): Promise<string> {
+    const firstDay = new Date('2400-01-01T00:00:00.000Z');
+    firstDay.setUTCDate(
+      firstDay.getUTCDate() + Math.floor(Math.random() * 100_000),
+    );
+    for (let offset = 0; offset < 100_000; offset += 1) {
+      const candidate = new Date(firstDay);
+      candidate.setUTCDate(candidate.getUTCDate() + offset);
+      const day = candidate.toISOString().slice(0, 10);
+      const nextDay = new Date(candidate);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      const count = await prisma.order.count({
+        where: { createdAt: { gte: candidate, lt: nextDay } },
+      });
+      if (count === 0) return day;
+    }
+    throw new Error(
+      'Could not find an unused UTC date in the isolated test database.',
+    );
+  }
+
+  async function setOrderCreatedAt(
+    id: string,
+    createdAt: Date,
+    status?: 'PENDING' | 'PROCESSING',
+  ) {
+    await prisma.order.update({
+      where: { id },
+      data: { createdAt, ...(status ? { status } : {}) },
+    });
+  }
+
   it('persists an order and related items through the HTTP route', async () => {
     const payload = validOrder();
     const response = await request(app.getHttpServer())
@@ -205,5 +245,109 @@ describe('orders PostgreSQL integration', () => {
       .get(`/orders/${created.body.id as string}`)
       .set('Authorization', authorizationHeader())
       .expect(404);
+  });
+
+  it('filters by combined criteria and includes both UTC date boundaries while excluding deleted orders', async () => {
+    const day = await findUnusedUtcDay();
+    const beginning = new Date(`${day}T00:00:00.000Z`);
+    const lastMillisecond = new Date(`${day}T23:59:59.999Z`);
+    const nextDay = new Date(beginning);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const beforeBoundary = await createOrder();
+    const onFinalMillisecond = await createOrder();
+    const nextDayOrder = await createOrder();
+    const deleted = await createOrder();
+    await setOrderCreatedAt(beforeBoundary.body.id, beginning, 'PROCESSING');
+    await setOrderCreatedAt(
+      onFinalMillisecond.body.id,
+      lastMillisecond,
+      'PROCESSING',
+    );
+    await setOrderCreatedAt(nextDayOrder.body.id, nextDay, 'PROCESSING');
+    await setOrderCreatedAt(deleted.body.id, lastMillisecond, 'PROCESSING');
+    await prisma.order.update({
+      where: { id: deleted.body.id },
+      data: { deletedAt: new Date() },
+    });
+
+    const response = await request(app.getHttpServer())
+      .get('/orders')
+      .query({
+        orderNumber: onFinalMillisecond.body.orderNumber,
+        status: 'PROCESSING',
+        startDate: day,
+        endDate: day,
+      })
+      .set('Authorization', authorizationHeader())
+      .expect(200);
+    expect(response.body.data.map((order: { id: string }) => order.id)).toEqual(
+      [onFinalMillisecond.body.id],
+    );
+
+    const dateRange = await request(app.getHttpServer())
+      .get('/orders')
+      .query({ startDate: day, endDate: day, limit: '100' })
+      .set('Authorization', authorizationHeader())
+      .expect(200);
+    const returnedIds = dateRange.body.data.map(
+      (order: { id: string }) => order.id,
+    );
+    expect(returnedIds).toContain(beforeBoundary.body.id);
+    expect(returnedIds).toContain(onFinalMillisecond.body.id);
+    expect(returnedIds).not.toContain(nextDayOrder.body.id);
+    expect(returnedIds).not.toContain(deleted.body.id);
+  });
+
+  it('paginates with deterministic id ordering for tied timestamps and returns empty beyond the last page', async () => {
+    const day = await findUnusedUtcDay();
+    const timestamp = new Date(`${day}T12:00:00.000Z`);
+    const created = await Promise.all([
+      createOrder(),
+      createOrder(),
+      createOrder(),
+    ]);
+    for (const result of created) {
+      await setOrderCreatedAt(result.body.id, timestamp);
+    }
+    const expectedIds = created
+      .map((result) => result.body.id as string)
+      .sort((left, right) => right.localeCompare(left));
+
+    const first = await request(app.getHttpServer())
+      .get('/orders')
+      .query({ startDate: day, endDate: day, page: '1', limit: '2' })
+      .set('Authorization', authorizationHeader())
+      .expect(200);
+    expect(first.body.data.map((order: { id: string }) => order.id)).toEqual(
+      expectedIds.slice(0, 2),
+    );
+    expect(first.body.meta).toEqual({
+      page: 1,
+      limit: 2,
+      total: 3,
+      totalPages: 2,
+    });
+
+    const last = await request(app.getHttpServer())
+      .get('/orders')
+      .query({ startDate: day, endDate: day, page: '2', limit: '2' })
+      .set('Authorization', authorizationHeader())
+      .expect(200);
+    expect(last.body.data.map((order: { id: string }) => order.id)).toEqual(
+      expectedIds.slice(2),
+    );
+
+    const beyond = await request(app.getHttpServer())
+      .get('/orders')
+      .query({ startDate: day, endDate: day, page: '3', limit: '2' })
+      .set('Authorization', authorizationHeader())
+      .expect(200);
+    expect(beyond.body.data).toEqual([]);
+    expect(beyond.body.meta).toEqual({
+      page: 3,
+      limit: 2,
+      total: 3,
+      totalPages: 2,
+    });
   });
 });

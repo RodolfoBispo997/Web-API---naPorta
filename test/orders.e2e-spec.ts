@@ -81,7 +81,9 @@ describe('orders HTTP routes', () => {
   let token: string;
   const create = vi.fn();
   const findFirst = vi.fn();
-  const prismaMock = { order: { create, findFirst } };
+  const findMany = vi.fn();
+  const count = vi.fn();
+  const prismaMock = { order: { create, findFirst, findMany, count } };
 
   beforeAll(async () => {
     process.env.JWT_SECRET = testSecret;
@@ -105,6 +107,8 @@ describe('orders HTTP routes', () => {
     vi.clearAllMocks();
     create.mockResolvedValue(makeOrder());
     findFirst.mockResolvedValue(makeOrder());
+    findMany.mockResolvedValue([makeOrder()]);
+    count.mockResolvedValue(1);
   });
 
   afterAll(async () => {
@@ -256,6 +260,139 @@ describe('orders HTTP routes', () => {
     });
   });
 
+  it('lists orders and returns pagination metadata', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/orders')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(response.body).toMatchObject({
+      data: [{ id: orderId, orderNumber: 'ORD-HTTP-100' }],
+      meta: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+    expect(response.body.data[0].items[0].price).toBe('12.30');
+    expect(response.body.data[0].items).toHaveLength(2);
+    expect(findMany.mock.calls[0][0]).toMatchObject({
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: 0,
+      take: 20,
+    });
+    expect(count).toHaveBeenCalledWith({
+      where: findMany.mock.calls[0][0].where,
+    });
+  });
+
+  it('trims an exact order number and combines filters and pagination', async () => {
+    await request(app.getHttpServer())
+      .get('/orders')
+      .query({
+        orderNumber: '  ORD-HTTP-100 ',
+        status: 'PROCESSING',
+        startDate: '2024-02-29',
+        endDate: '2024-03-01',
+        page: '2',
+        limit: '5',
+      })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(findMany.mock.calls[0][0]).toMatchObject({
+      where: {
+        deletedAt: null,
+        AND: [
+          { orderNumber: 'ORD-HTTP-100' },
+          { status: 'PROCESSING' },
+          {
+            createdAt: {
+              gte: new Date('2024-02-29T00:00:00.000Z'),
+              lt: new Date('2024-03-02T00:00:00.000Z'),
+            },
+          },
+        ],
+      },
+      skip: 5,
+      take: 5,
+    });
+  });
+
+  it.each(['PENDING', 'PROCESSING', 'DELIVERED', 'CANCELLED'])(
+    'accepts order status %s',
+    async (status) => {
+      await request(app.getHttpServer())
+        .get('/orders')
+        .query({ status })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(findMany.mock.calls[0][0].where.AND).toEqual([{ status }]);
+    },
+  );
+
+  it.each([
+    { status: 'UNKNOWN' },
+    { status: '' },
+    { orderNumber: '   ' },
+    { startDate: '2026-02-29' },
+    { startDate: '2026-13-01' },
+    { startDate: '' },
+    { endDate: '' },
+    { startDate: '2026-12-31', endDate: '2026-01-01' },
+    { page: '0' },
+    { page: '-1' },
+    { page: '1.5' },
+    { page: 'abc' },
+    { page: '1e2' },
+    { page: '10001' },
+    { page: '9007199254740993' },
+    { page: '' },
+    { limit: '0' },
+    { limit: '101' },
+    { limit: '2.5' },
+    { extra: 'value' },
+    { status: ['PENDING', 'DELIVERED'] },
+    { orderNumber: ['ORD-1', 'ORD-2'] },
+    { page: ['1', '2'] },
+  ])('rejects invalid list query $status', async (query) => {
+    await request(app.getHttpServer())
+      .get('/orders')
+      .query(query)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+    expect(findMany).not.toHaveBeenCalled();
+    expect(count).not.toHaveBeenCalled();
+  });
+
+  it('accepts the leap day and permits either side of a date range alone', async () => {
+    for (const query of [
+      { startDate: '2024-02-29' },
+      { endDate: '2024-12-31' },
+    ]) {
+      await request(app.getHttpServer())
+        .get('/orders')
+        .query(query)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+    }
+  });
+
+  it.each(['1', '100'])('accepts limit boundary %s', async (limit) => {
+    await request(app.getHttpServer())
+      .get('/orders')
+      .query({ limit })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(findMany.mock.calls[0][0].take).toBe(Number(limit));
+  });
+
+  it('accepts the maximum page and limit values without querying beyond the requested page', async () => {
+    await request(app.getHttpServer())
+      .get('/orders')
+      .query({ page: '10000', limit: '100' })
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(findMany.mock.calls[0][0]).toMatchObject({
+      skip: 999_900,
+      take: 100,
+    });
+  });
+
   it('returns 404 when the order does not exist or is deleted', async () => {
     findFirst.mockResolvedValueOnce(null);
     await request(app.getHttpServer())
@@ -273,6 +410,7 @@ describe('orders HTTP routes', () => {
 
   it.each([
     ['POST', '/orders', input],
+    ['GET', '/orders', undefined],
     ['GET', `/orders/${orderId}`, undefined],
   ])('requires a valid bearer token for %s %s', async (method, path, body) => {
     const unauthenticated = request(app.getHttpServer());
@@ -285,6 +423,7 @@ describe('orders HTTP routes', () => {
 
   it.each([
     ['POST', '/orders', input],
+    ['GET', '/orders', undefined],
     ['GET', `/orders/${orderId}`, undefined],
   ])(
     'rejects an invalid bearer token for %s %s',

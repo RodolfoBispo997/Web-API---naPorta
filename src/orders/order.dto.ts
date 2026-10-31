@@ -11,6 +11,7 @@ import {
   Validate,
   ValidateNested,
   ValidatorConstraint,
+  type ValidationArguments,
   type ValidatorConstraintInterface,
 } from 'class-validator';
 
@@ -45,8 +46,8 @@ class RealCalendarDateConstraint implements ValidatorConstraintInterface {
     return day <= daysInMonth[month - 1];
   }
 
-  defaultMessage(): string {
-    return 'expectedDeliveryDate must be a real calendar date in YYYY-MM-DD format.';
+  defaultMessage(args: ValidationArguments): string {
+    return `${args.property} must be a real calendar date in YYYY-MM-DD format.`;
   }
 }
 

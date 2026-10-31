@@ -62,7 +62,7 @@ describe('Swagger documentation', () => {
     expect(body.paths['/orders/{id}'].delete.responses['404']).toBeDefined();
     expect(body.paths['/orders/{id}'].delete.responses['409']).toBeUndefined();
     for (const [path, method, statuses] of [
-      ['/auth/login', 'post', ['200', '400', '401']],
+      ['/auth/login', 'post', ['200', '400', '401', '429']],
       ['/orders', 'post', ['201', '400', '401', '409']],
       ['/orders', 'get', ['200', '400', '401']],
       ['/orders/{id}', 'get', ['200', '400', '401', '404']],

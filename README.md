@@ -91,6 +91,19 @@ O token usa HS256, inclui o identificador do usuário em `sub` e expira em 15 mi
 
 Usuário inexistente e senha incorreta retornam a mesma resposta genérica `401 Unauthorized`. Senha acima de 72 bytes UTF-8 retorna `400 Bad Request` antes da consulta ou comparação. O hash da senha nunca é retornado.
 
+O login permite até **5 requisições em 60 segundos** por endereço IPv4 ou
+sub-rede IPv6 /64, incluindo logins bem-sucedidos e entradas inválidas. Ao
+exceder o limite, a requisição retorna `429 Too Many Requests` e bloqueia
+novas tentativas pelo mesmo contador por 60 segundos; `Retry-After` informa o
+tempo restante em segundos. Usuários que compartilham um IPv4 ou uma sub-rede
+IPv6 /64 compartilham o limite. Um IPv4 mapeado em IPv6, como
+`::ffff:192.0.2.10`, usa o mesmo contador que `192.0.2.10`.
+
+O contador é mantido em memória, é independente por instância e é perdido ao
+reiniciar. O IP é obtido da conexão sem confiar no `X-Forwarded-For` enviado
+pelo cliente. Atrás de um proxy, clientes podem compartilhar o contador do
+endereço do proxy até que um proxy confiável seja configurado explicitamente.
+
 ## Pedidos
 
 As rotas disponíveis são `POST /orders`, `GET /orders/:id`, `GET /orders`, `PATCH /orders/:id` e `DELETE /orders/:id`. Todas exigem `Authorization: Bearer <JWT>`.

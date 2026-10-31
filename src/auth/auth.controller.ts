@@ -1,4 +1,12 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService, type LoginResponse } from './auth.service.js';
 import { LoginDto } from './login.dto.js';
 import {
@@ -6,6 +14,7 @@ import {
   ApiBody,
   ApiOkResponse,
   ApiOperation,
+  ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -17,6 +26,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
+  @UseGuards(ThrottlerGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Autenticar e obter token JWT' })
   @ApiBody({ type: LoginDto })
@@ -25,6 +35,11 @@ export class AuthController {
     description: 'Entrada inválida ou senha acima de 72 bytes UTF-8.',
   })
   @ApiUnauthorizedResponse({ description: 'E-mail ou senha inválidos.' })
+  @ApiResponse({
+    status: 429,
+    description:
+      'Limite de tentativas excedido; aguarde antes de tentar novamente.',
+  })
   login(@Body() credentials: LoginDto): Promise<LoginResponse> {
     return this.authService.login(credentials);
   }

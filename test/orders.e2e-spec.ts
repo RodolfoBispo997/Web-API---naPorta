@@ -136,6 +136,21 @@ describe('orders HTTP routes', () => {
     }
   });
 
+  it('keeps order authentication unchanged when login is rate limited', async () => {
+    for (let i = 0; i < 5; i++) {
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({})
+        .expect(400);
+    }
+    await request(app.getHttpServer()).post('/auth/login').send({}).expect(429);
+    await request(app.getHttpServer()).get('/orders').expect(401);
+    await request(app.getHttpServer())
+      .get('/orders')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+  });
+
   it('creates an order with multiple items and returns the documented shape', async () => {
     const response = await request(app.getHttpServer())
       .post('/orders')

@@ -4,8 +4,8 @@ API NestJS para gerenciamento de pedidos, construída em etapas.
 
 ## Estado atual
 
-- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, usuário local de demonstração e criação, consulta, listagem, edição e exclusão lógica de pedidos, com testes unitários/HTTP/de integração.
-- **Ainda não implementado:** autorização por papéis, refresh token, cadastro público e seed de pedidos.
+- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, seed de usuário e pedidos demonstrativos e criação, consulta, listagem, edição e exclusão lógica de pedidos, com testes unitários/HTTP/de integração.
+- **Ainda não implementado:** autorização por papéis, refresh token e cadastro público.
 
 O campo `deletedAt` registra a exclusão lógica. Pedidos excluídos continuam no banco com seus itens, mas não aparecem na consulta individual nem na listagem.
 
@@ -21,6 +21,7 @@ O campo `deletedAt` registra a exclusão lógica. Pedidos excluídos continuam n
 ## Pré-requisitos
 
 - Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`; validado nesta etapa em Node 20.20.0. Outras versões não foram testadas.
+- No Node 20.20.0, a instalação emite um aviso de engine para a dependência transitiva `@prisma/streams-local`, que declara Node `>=22`. A instalação e as verificações descritas foram executadas com sucesso em Node 20.20.0 apesar do aviso.
 - npm 10 ou superior
 - Docker Desktop com Docker Compose v2 em execução
 
@@ -41,6 +42,8 @@ npm run start:dev
 `npm run build` também gera o Prisma Client antes de compilar. O client gerado fica em `src/generated/prisma/` e é ignorado pelo Git.
 
 O Compose publica o PostgreSQL somente no loopback (`127.0.0.1`), por padrão na porta `5433`, e usa um volume nomeado. Se a porta já estiver ocupada, altere `POSTGRES_PORT` e a porta na `DATABASE_URL` do `.env` para o mesmo valor.
+
+A API escuta em `127.0.0.1` por padrão, inclusive quando `HOST` estiver ausente ou vazio. Defina `HOST=0.0.0.0` quando precisar aceitar conexões externas, por exemplo dentro de um container. Essa configuração expõe a aplicação às interfaces de rede disponíveis; use credenciais e segredo adequados ao ambiente, pois os valores demonstrativos não são apropriados para produção.
 
 As credenciais de `.env.example` são valores de demonstração apenas para desenvolvimento local. Não as reutilize fora dessa finalidade. O arquivo `.env` não deve ser versionado.
 
@@ -301,7 +304,45 @@ Cada pedido e seus itens são criados em uma escrita aninhada atômica. A lista 
 - `npm run db:status`: consulta o estado das migrations.
 - `npm run lint`: verifica o código TypeScript em `src/` e `test/`.
 - `npm test` e `npm run test:e2e`: executam testes unitários e HTTP com módulo Nest e Prisma mockado; não usam o banco principal nem executam o seed. Incluem os testes das rotas de criação, consulta, listagem, atualização e exclusão lógica.
-- `npm run test:integration`: executa testes HTTP contra PostgreSQL real, incluindo atomicidade da substituição de itens, exclusão lógica persistente e concorrência controlada entre PATCH e exclusão. Exige `TEST_DATABASE_URL` apontando para uma base isolada chamada `naporta_orders_test_<sufixo>`; a suíte valida o nome e confirma a base conectada. Antes, configure `DATABASE_URL` com a mesma URL e aplique `npm run db:migrate:deploy`. Os testes removem somente os pedidos criados com o prefixo da própria execução; não removem banco, volume ou container.
+- `npm run test:integration`: executa testes HTTP contra PostgreSQL real, incluindo atomicidade da substituição de itens, exclusão lógica persistente e concorrência controlada entre PATCH e exclusão. Exige `TEST_DATABASE_URL` apontando para uma base isolada chamada `naporta_orders_test_<sufixo>`; a suíte valida o nome e confirma a base conectada. Antes, configure `DATABASE_URL` com a mesma URL e aplique `npm run db:migrate:deploy`. A suíte limpa os registros de teste que criou; não remove banco, volume ou container.
 - `npm run build`: gera o client e compila a aplicação.
 
-Para parar o container, execute `docker compose down`. Isso mantém os dados no volume. Remover o volume, por exemplo com `docker compose down -v`, apaga os dados locais.
+### Banco isolado para testes de integração
+
+Execute em um terminal separado, na raiz do projeto, depois de instalar as dependências e gerar o Prisma Client. Os comandos abaixo criam outro projeto Compose e outro banco, com nomes exclusivos. Escolha uma porta livre se `55433` estiver ocupada. A senha gerada é apenas para o banco temporário de testes; não copie essa configuração para produção.
+
+PowerShell:
+
+```powershell
+$testId = [guid]::NewGuid().ToString('N').Substring(0, 12)
+$testProject = "naporta-it-$testId"
+$env:POSTGRES_USER = 'naporta_test'
+$env:POSTGRES_PASSWORD = [guid]::NewGuid().ToString('N')
+$env:POSTGRES_DB = "naporta_orders_test_$testId"
+$env:POSTGRES_PORT = '55433'
+$env:DATABASE_URL = "postgresql://$($env:POSTGRES_USER):$($env:POSTGRES_PASSWORD)@127.0.0.1:$($env:POSTGRES_PORT)/$($env:POSTGRES_DB)?schema=public"
+$env:TEST_DATABASE_URL = $env:DATABASE_URL
+docker compose -p $testProject up -d --wait
+npm run db:migrate:deploy
+npm run test:integration
+docker compose -p $testProject down
+```
+
+Alternativa Bash (requer `openssl`):
+
+```bash
+test_id="$(openssl rand -hex 6)"
+test_project="naporta-it-$test_id"
+export POSTGRES_USER=naporta_test
+export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+export POSTGRES_DB="naporta_orders_test_$test_id"
+export POSTGRES_PORT=55433
+export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}?schema=public"
+export TEST_DATABASE_URL="$DATABASE_URL"
+docker compose -p "$test_project" up -d --wait
+npm run db:migrate:deploy
+npm run test:integration
+docker compose -p "$test_project" down
+```
+
+A suíte remove os registros que criou. Execute o `down` do projeto de testes mesmo se algum comando anterior falhar: ele interrompe e remove o container e a rede desse projeto, mas preserva seu volume e o banco de testes. O volume temporário permanece após os testes; identifique-o pelo nome do projeto antes de decidir removê-lo, sem tocar em volumes preexistentes. Feche o terminal separado para descartar as variáveis de ambiente de teste. Para interromper a aplicação de desenvolvimento, use `Ctrl+C`; para parar o PostgreSQL local principal, `docker compose down` também mantém seu volume.

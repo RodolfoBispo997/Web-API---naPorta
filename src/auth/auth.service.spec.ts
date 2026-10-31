@@ -204,6 +204,50 @@ describe('demo user seed helper', () => {
     ).resolves.toBe('already-exists');
   });
 
+  it('recognizes the email index in the Prisma PostgreSQL adapter error shape', async () => {
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: userId });
+    const create = vi.fn().mockRejectedValue({
+      code: 'P2002',
+      meta: {
+        driverAdapterError: {
+          cause: { constraint: { index: 'users_email_key' } },
+        },
+      },
+    });
+    const repository = { user: { findUnique, create } } as unknown as Pick<
+      PrismaClient,
+      'user'
+    >;
+    await expect(
+      createDemoUserIfMissing(repository, email, password),
+    ).resolves.toBe('already-exists');
+    expect(findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hide an unrelated PostgreSQL unique index error', async () => {
+    const uniqueError = {
+      code: 'P2002',
+      meta: {
+        driverAdapterError: {
+          cause: { constraint: { index: 'users_another_unique_index' } },
+        },
+      },
+    };
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const create = vi.fn().mockRejectedValue(uniqueError);
+    const repository = { user: { findUnique, create } } as unknown as Pick<
+      PrismaClient,
+      'user'
+    >;
+    await expect(
+      createDemoUserIfMissing(repository, email, password),
+    ).rejects.toBe(uniqueError);
+    expect(findUnique).toHaveBeenCalledTimes(1);
+  });
+
   it('propagates unrelated database errors', async () => {
     const dbError = new Error('database unavailable');
     const findUnique = vi.fn().mockResolvedValue(null);

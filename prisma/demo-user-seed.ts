@@ -14,11 +14,21 @@ function isEmailUniqueConstraintError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const candidate = error as {
     code?: unknown;
-    meta?: { target?: unknown };
+    meta?: {
+      target?: unknown;
+      driverAdapterError?: {
+        cause?: { constraint?: { index?: unknown } };
+      };
+    };
   };
   if (candidate.code !== 'P2002') return false;
   const target = candidate.meta?.target;
-  return Array.isArray(target) ? target.includes('email') : target === 'email';
+  const directTarget = Array.isArray(target)
+    ? target.includes('email')
+    : target === 'email';
+  const adapterIndex =
+    candidate.meta?.driverAdapterError?.cause?.constraint?.index;
+  return directTarget || adapterIndex === 'users_email_key';
 }
 
 export class DemoUserConfigurationError extends Error {}

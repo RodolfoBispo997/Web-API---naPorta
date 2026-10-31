@@ -1,68 +1,32 @@
 # API naPorta
 
-API NestJS para gerenciamento de pedidos, construída em etapas.
+API REST para gerenciamento de pedidos, desenvolvida para o desafio backend da
+naPorta. Permite autenticação, criação, consulta, listagem com filtros,
+atualização e exclusão lógica de pedidos.
 
-## Estado atual
+**Tecnologias:** Node.js e TypeScript, NestJS, PostgreSQL, Prisma, JWT Bearer,
+Docker Compose, Swagger/OpenAPI e Vitest.
 
-- **Implementado:** NestJS 11, PostgreSQL local via Docker Compose, Prisma ORM 7, migration inicial, login com JWT Bearer, guard reutilizável, seed de usuário e pedidos demonstrativos e criação, consulta, listagem, edição e exclusão lógica de pedidos, com testes unitários/HTTP/de integração.
-- **Ainda não implementado:** autorização por papéis, refresh token e cadastro público.
+## Início rápido com Docker
 
-O campo `deletedAt` registra a exclusão lógica. Pedidos excluídos continuam no banco com seus itens, mas não aparecem na consulta individual nem na listagem.
-
-## Modelagem inicial
-
-- Os três modelos usam UUIDs. `User.email` e `Order.orderNumber` têm unicidade no banco; o número do pedido continua único mesmo quando `deletedAt` for preenchido.
-- O pedido guarda uma cópia do nome, documento e endereço de entrega. O endereço fica em campos simples no próprio pedido, sem tabelas de cliente ou endereço.
-- `expectedDeliveryDate` é `DATE`, pois representa um dia de calendário. Datas de criação, atualização e exclusão usam `TIMESTAMPTZ(3)`.
-- `OrderItem.price` usa `DECIMAL(12,2)`, com precisão fixa para valores monetários. Não há quantidade, frete nem total nesta etapa.
-- A chave estrangeira de `OrderItem.orderId` tem índice para buscar os itens de um pedido. O status pode ser filtrado, mas não recebe índice adicional sem evidência de volume e perfil de consulta; índices únicos de e-mail e número do pedido decorrem das próprias restrições de unicidade.
-- Exclusão física de um pedido apaga seus itens por `ON DELETE CASCADE`. A API usa exclusão lógica: preencher `deletedAt` não apaga o pedido nem seus itens.
-
-## Pré-requisitos
-
-- Node.js `^24.22.1`; recomenda-se Node 24.22.1, indicado em `.nvmrc` e validado localmente com npm 11.19.1. Outras versões da faixa não foram testadas nesta etapa.
-- No Node 20.20.0, a instalação emite um aviso de engine para a dependência transitiva `@prisma/streams-local`, que declara Node `>=22`. A instalação e as verificações descritas foram executadas com sucesso em Node 20.20.0 apesar do aviso.
-- npm 10 ou superior
-- Docker Desktop com Docker Compose v2 em execução
-
-## Configuração local
-
-No PowerShell, na raiz do projeto:
+Requer Docker Desktop com Compose v2 em execução e portas `3000` e `5433`
+disponíveis. Na raiz do projeto, crie `.env` a partir de `.env.example` se
+ainda não existir:
 
 ```powershell
-npm install
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-docker compose up -d --wait
-npm run prisma:generate
-npm run db:migrate:deploy
-npm run db:seed
-npm run start:dev
 ```
 
-`npm run build` também gera o Prisma Client antes de compilar. O client gerado fica em `src/generated/prisma/` e é ignorado pelo Git.
+No Bash: `test -f .env || cp .env.example .env`.
 
-O Compose publica o PostgreSQL somente no loopback (`127.0.0.1`), por padrão na porta `5433`, e usa um volume nomeado. Se a porta já estiver ocupada, altere `POSTGRES_PORT` e a porta na `DATABASE_URL` do `.env` para o mesmo valor.
+Se já houver `.env`, preserve-o e confira as variáveis necessárias. Os valores
+de exemplo são **apenas para demonstração local**, não para produção.
+`DOCKER_DATABASE_URL` deve apontar para `postgres:5432` e usar o mesmo usuário,
+senha e banco de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB`.
+Codifique caracteres reservados nas credenciais da URL. Configure também
+`JWT_SECRET`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD`.
 
-A API escuta em `127.0.0.1` por padrão, inclusive quando `HOST` estiver ausente ou vazio. Defina `HOST=0.0.0.0` quando precisar aceitar conexões externas, por exemplo dentro de um container. Essa configuração expõe a aplicação às interfaces de rede disponíveis; use credenciais e segredo adequados ao ambiente, pois os valores demonstrativos não são apropriados para produção.
-
-As credenciais de `.env.example` são valores de demonstração apenas para desenvolvimento local. Não as reutilize fora dessa finalidade. O arquivo `.env` não deve ser versionado.
-
-Configure `DATABASE_URL`, `JWT_SECRET`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD` no `.env`. Se o arquivo já existir, acrescente as variáveis que estiverem faltando sem substituir seus valores. O segredo JWT deve ter pelo menos 32 bytes. Os valores do exemplo são exclusivamente demonstrativos; em ambientes reais use um segredo aleatório armazenado em configuração segura.
-
-Os comandos Prisma exigem `DATABASE_URL` configurada. `prisma generate` e `prisma validate` não precisam de uma conexão ativa com o banco.
-
-### API e PostgreSQL com Docker Compose
-
-Como alternativa à execução local da API, copie `.env.example` para `.env`
-se ainda não existir. Se já existir, preserve-o e acrescente as variáveis
-`DOCKER_DATABASE_URL` e `API_PORT` se necessário. A URL para o container usa
-o host `postgres` e a porta interna `5432`; usuário, senha e banco devem
-coincidir com `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB`. Caracteres
-reservados em credenciais de URL devem ser codificados. Configure também
-`JWT_SECRET`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD` no `.env`; os valores
-de exemplo destinam-se apenas à demonstração local.
-
-Na raiz do projeto, execute:
+Execute em ordem:
 
 ```bash
 docker compose up -d --wait postgres
@@ -72,331 +36,108 @@ docker compose run --rm api npm run db:seed
 docker compose --profile api up -d api
 ```
 
-O primeiro comando aguarda o PostgreSQL ficar saudável. Execute a migration
-versionada antes de iniciar ou usar a API; ela não é aplicada automaticamente.
-O seed é explícito e pode ser repetido sem sobrescrever usuários ou pedidos
-existentes. O perfil `api` mantém `docker compose up -d --wait` disponível
-para o fluxo local apenas com PostgreSQL. A API no container escuta em
-`0.0.0.0`, mas sua porta é publicada apenas em `127.0.0.1`, por padrão
-`3000`; altere `API_PORT` se estiver ocupada. O PostgreSQL continua publicado
-no loopback por `POSTGRES_PORT`. A imagem inclui dependências de desenvolvimento
-para que os comandos Prisma e seed funcionem.
-
-Para interromper e remover os containers e a rede do projeto, preservando o
-volume do banco, execute `docker compose --profile api down`. Não use a
-configuração demonstrativa como configuração de produção.
-
-## Autenticação
-
-A documentação interativa está disponível em `http://127.0.0.1:3000/docs` (ajuste host e porta se configurados). No Swagger, execute `POST /auth/login` com o usuário de demonstração configurado e copie o valor de `accessToken` retornado. Em **Authorize**, informe esse token para chamar as rotas de pedidos. O documento OpenAPI também está disponível em `/docs-json`.
-
-`POST /auth/login` recebe e-mail e senha. O e-mail é removido de espaços nas extremidades e convertido para minúsculas. O login valida formato e limites de entrada, mas não impõe regras de complexidade à senha. A senha pode ter até 72 bytes UTF-8, que é o limite do bcrypt. Senhas maiores recebem `400 Bad Request` com a mensagem `Password must be no longer than 72 UTF-8 bytes.` A contagem considera os bytes UTF-8, inclusive para caracteres multibyte. Isso impede que um sufixo além do limite seja ignorado pelo bcrypt.
-
-Requisição:
-
-```json
-{
-  "email": "<DEMO_USER_EMAIL>",
-  "password": "<DEMO_USER_PASSWORD>"
-}
-```
-
-Resposta `200 OK`:
-
-```json
-{
-  "accessToken": "<JWT>",
-  "tokenType": "Bearer",
-  "expiresIn": 900
-}
-```
-
-Exemplo PowerShell para autenticar e preparar o cabeçalho Bearer:
-
-```powershell
-$body = @{ email = '<email>'; password = '<password>' } | ConvertTo-Json
-$login = Invoke-RestMethod -Method Post -Uri http://localhost:3000/auth/login `
-  -ContentType 'application/json' -Body $body
-$headers = @{ Authorization = "Bearer $($login.accessToken)" }
-```
-
-Use `$headers` nas rotas protegidas de pedidos descritas abaixo.
-
-O token usa HS256, inclui o identificador do usuário em `sub` e expira em 15 minutos. Envie-o como `Authorization: Bearer <JWT>` às rotas que forem protegidas por `JwtAuthGuard`. Todas as rotas de pedidos abaixo exigem esse token válido.
-
-Usuário inexistente e senha incorreta retornam a mesma resposta genérica `401 Unauthorized`. Senha acima de 72 bytes UTF-8 retorna `400 Bad Request` antes da consulta ou comparação. O hash da senha nunca é retornado.
-
-O login permite até **5 requisições em 60 segundos** por endereço IPv4 ou
-sub-rede IPv6 /64, incluindo logins bem-sucedidos e entradas inválidas. Ao
-exceder o limite, a requisição retorna `429 Too Many Requests` e bloqueia
-novas tentativas pelo mesmo contador por 60 segundos; `Retry-After` informa o
-tempo restante em segundos. Usuários que compartilham um IPv4 ou uma sub-rede
-IPv6 /64 compartilham o limite. Um IPv4 mapeado em IPv6, como
-`::ffff:192.0.2.10`, usa o mesmo contador que `192.0.2.10`.
-
-O contador é mantido em memória, é independente por instância e é perdido ao
-reiniciar. O IP é obtido da conexão sem confiar no `X-Forwarded-For` enviado
-pelo cliente. Atrás de um proxy, clientes podem compartilhar o contador do
-endereço do proxy até que um proxy confiável seja configurado explicitamente.
-
-## Pedidos
-
-As rotas disponíveis são `POST /orders`, `GET /orders/:id`, `GET /orders`, `PATCH /orders/:id` e `DELETE /orders/:id`. Todas exigem `Authorization: Bearer <JWT>`.
-
-### Criar pedido
-
-Exemplo de `POST /orders`:
-
-```json
-{
-  "orderNumber": "ORD-2026-001",
-  "expectedDeliveryDate": "2026-12-31",
-  "customer": {
-    "name": "Ada Lovelace",
-    "document": "DOC-123"
-  },
-  "deliveryAddress": {
-    "street": "Rua das Flores",
-    "number": "42",
-    "neighborhood": "Centro",
-    "city": "Campinas",
-    "state": "SP",
-    "postalCode": "13000-000",
-    "country": "BR",
-    "complement": "Sala 2"
-  },
-  "items": [
-    { "description": "Caixa pequena", "price": "19.90" },
-    { "description": "Envelope", "price": "0" }
-  ]
-}
-```
-
-Resposta `201 Created` (IDs e horários são ilustrativos):
-
-```json
-{
-  "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f86",
-  "orderNumber": "ORD-2026-001",
-  "status": "PENDING",
-  "expectedDeliveryDate": "2026-12-31",
-  "customer": { "name": "Ada Lovelace", "document": "DOC-123" },
-  "deliveryAddress": {
-    "street": "Rua das Flores",
-    "number": "42",
-    "complement": "Sala 2",
-    "neighborhood": "Centro",
-    "city": "Campinas",
-    "state": "SP",
-    "postalCode": "13000-000",
-    "country": "BR"
-  },
-  "items": [
-    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f87", "description": "Caixa pequena", "price": "19.90" },
-    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f88", "description": "Envelope", "price": "0.00" }
-  ],
-  "createdAt": "2026-10-31T14:00:00.000Z",
-  "updatedAt": "2026-10-31T14:00:00.000Z"
-}
-```
-
-`expectedDeliveryDate` deve ser uma data real no formato `YYYY-MM-DD`; é armazenada como `DATE`, sem conversão por fuso horário, e não precisa estar no futuro. `price` deve ser texto decimal não negativo, com até 10 dígitos inteiros e até 2 casas decimais, compatível com `DECIMAL(12,2)`. A resposta sempre usa uma string com exatamente duas casas decimais, por exemplo `"0.00"` e `"19.90"`. Os preços são enviados ao Prisma como texto e não passam por ponto flutuante.
-
-Textos são aparados nas extremidades e não podem ficar vazios. Os limites de comprimento seguem o schema Prisma; campos desconhecidos, inclusive nos objetos aninhados, são rejeitados. O status inicial é sempre `PENDING`; o cliente não pode definir status, identificadores ou timestamps.
-
-A criação usa uma escrita aninhada do Prisma para inserir o pedido e todos os itens na mesma operação transacional. Se a gravação de um item falhar, o pedido também é revertido. O índice único PostgreSQL de `order_number` resolve disputas concorrentes; somente a violação dessa restrição é convertida em `409 Conflict`.
-
-### Consultar pedido
-
-Exemplo de requisição: `GET /orders/c0290cbd-33d9-44bb-9bad-6d194e0c2f86`, com o cabeçalho Bearer mostrado na seção de autenticação. Exemplo de resposta `200 OK` (valores ilustrativos):
-
-```json
-{
-  "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f86",
-  "orderNumber": "ORD-2026-001",
-  "status": "PENDING",
-  "expectedDeliveryDate": "2026-12-31",
-  "customer": { "name": "Ada Lovelace", "document": "DOC-123" },
-  "deliveryAddress": {
-    "street": "Rua das Flores",
-    "number": "42",
-    "complement": "Sala 2",
-    "neighborhood": "Centro",
-    "city": "Campinas",
-    "state": "SP",
-    "postalCode": "13000-000",
-    "country": "BR"
-  },
-  "items": [
-    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f87", "description": "Caixa pequena", "price": "19.90" },
-    { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f88", "description": "Envelope", "price": "0.00" }
-  ],
-  "createdAt": "2026-10-31T14:00:00.000Z",
-  "updatedAt": "2026-10-31T14:00:00.000Z"
-}
-```
-
-UUID inválido retorna `400 Bad Request`; pedido inexistente ou com `deletedAt` preenchido retorna `404 Not Found`.
-
-### Listar pedidos
-
-`GET /orders` retorna somente pedidos com `deletedAt: null`, incluindo os itens no mesmo formato de `GET /orders/:id`. Todos os filtros informados são combinados com AND:
-
-| Parâmetro | Tipo e regra | Padrão |
-| --- | --- | --- |
-| `orderNumber` | Texto, correspondência exata; espaços externos são removidos | sem filtro |
-| `status` | `PENDING`, `PROCESSING`, `DELIVERED` ou `CANCELLED` | sem filtro |
-| `startDate` | Data real `YYYY-MM-DD`, inclusiva | sem limite inicial |
-| `endDate` | Data real `YYYY-MM-DD`, inclusiva | sem limite final |
-| `page` | Inteiro entre 1 e 10.000 | `1` |
-| `limit` | Inteiro entre 1 e 100 | `20` |
-
-O intervalo considera `createdAt` em UTC: `startDate` começa à meia-noite inclusiva e `endDate` termina antes da meia-noite do dia seguinte, portanto inclui o dia final completo. É permitido informar só uma das datas. Quando ambas forem informadas, `startDate` precisa ser anterior ou igual a `endDate`. Parâmetros desconhecidos, vazios, repetidos (que resultem em arrays), inválidos ou paginação fora dos limites retornam `400 Bad Request`.
-
-Exemplos (todos com o cabeçalho Bearer):
-
-```text
-GET /orders?orderNumber=%20ORD-2026-001%20
-GET /orders?status=PROCESSING
-GET /orders?startDate=2026-01-01
-GET /orders?endDate=2026-01-31
-GET /orders?startDate=2026-01-01&endDate=2026-01-31&page=2&limit=10&status=PROCESSING
-```
-
-Resposta `200 OK`:
-
-```json
-{
-  "data": [
-    {
-      "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f86",
-      "orderNumber": "ORD-2026-001",
-      "status": "PROCESSING",
-      "expectedDeliveryDate": "2026-12-31",
-      "customer": { "name": "Ada Lovelace", "document": "DOC-123" },
-      "deliveryAddress": {
-        "street": "Rua das Flores", "number": "42", "complement": null,
-        "neighborhood": "Centro", "city": "Campinas", "state": "SP",
-        "postalCode": "13000-000", "country": "BR"
-      },
-      "items": [
-        { "id": "c0290cbd-33d9-44bb-9bad-6d194e0c2f87", "description": "Caixa pequena", "price": "19.90" }
-      ],
-      "createdAt": "2026-01-15T14:00:00.000Z",
-      "updatedAt": "2026-01-15T14:00:00.000Z"
-    }
-  ],
-  "meta": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
-}
-```
-
-Os resultados são ordenados por `createdAt` decrescente e, em caso de empate, por `id` decrescente. Uma página além da última retorna `data: []`, mantendo `total` e `totalPages`; sem resultados, `totalPages` é `0`. A busca e a contagem usam o mesmo filtro, mas são consultas separadas e não prometem um snapshot transacional comum.
-
-### Atualizar pedido
-
-`PATCH /orders/:id` aceita atualização parcial dos campos `orderNumber`, `status`, `expectedDeliveryDate`, `customer`, `deliveryAddress` e `items`. Exemplo:
-
-```json
-{
-  "status": "PROCESSING",
-  "customer": { "name": "Ada Lovelace atualizada" },
-  "deliveryAddress": { "complement": null },
-  "items": [{ "description": "Item substituto", "price": "12.30" }]
-}
-```
-
-Envie ao menos um campo. Os campos enviados em `customer` e `deliveryAddress` são atualizados individualmente; os omitidos permanecem como estavam. Objetos aninhados vazios e campos desconhecidos são rejeitados. `deliveryAddress.complement` aceita `null` para remover o complemento; os outros campos não anuláveis rejeitam `null`. As mesmas regras de data, status, texto e preço da criação são aplicadas.
-
-Se `items` for omitido, os itens atuais são preservados. Se for enviado, deve conter ao menos um item válido e substitui a lista inteira. Os itens novos recebem novos IDs; os IDs anteriores não são preservados. A atualização dos campos do pedido e a substituição dos itens ocorrem na mesma transação, portanto a falha ao criar um novo item reverte também a exclusão dos itens anteriores e as demais alterações.
-
-A escrita do PATCH é condicional a `deletedAt: null` e ocorre dentro da transação que atualiza os itens. O teste de integração controla o caso em que uma exclusão mantém primeiro o bloqueio da linha: o PATCH aguarda, a condição é reavaliada após a exclusão confirmar e o PATCH retorna `404` sem alterar o pedido. Isso comprova esse cenário de serialização no PostgreSQL; a ordem inversa e outras regras de concorrência ou transição de status não foram testadas nem são definidas aqui.
-
-Resposta `200 OK`: o pedido atualizado no mesmo formato de `GET /orders/:id`. UUID inválido retorna `400`; pedido inexistente ou já excluído retorna `404`; `orderNumber` em conflito retorna `409`.
-
-### Excluir pedido
-
-`DELETE /orders/:id` preenche `deletedAt` sem remover fisicamente o pedido ou seus itens. A primeira exclusão retorna `204 No Content`, sem corpo; pedido inexistente ou já excluído retorna `404`. Pedidos excluídos deixam de aparecer em `GET /orders` e `GET /orders/:id` e não podem ser atualizados. O número continua reservado pela restrição única, mesmo após a exclusão lógica.
-
-### Erros das rotas
-
-- `400 Bad Request`: corpo ou filtro inválido, data impossível, período invertido, preço inválido, parâmetros/campos desconhecidos ou UUID malformado.
-- `401 Unauthorized`: token ausente, inválido ou expirado.
-- `404 Not Found`: pedido inexistente ou marcado como excluído logicamente.
-- `409 Conflict`: `orderNumber` já utilizado.
-
-## Seed de demonstração
-
-`npm run db:seed` prepara o usuário local e pedidos fictícios. Antes, inicie o PostgreSQL, configure `DATABASE_URL`, `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD` no `.env` e aplique as migrations versionadas com `npm run db:migrate:deploy`. O seed é destinado somente à demonstração local; os clientes, documentos e endereços abaixo são dados inventados.
-
-O usuário é criado com bcrypt de custo 12. O e-mail é normalizado como no login e a senha deve ter entre 1 e 72 bytes UTF-8, sem regra de complexidade. Se o e-mail já existir, o seed preserva os dados e a senha. Se a senha configurada não corresponder à conta existente, use a senha conhecida ou configure outro e-mail de demonstração; o seed não redefine a conta.
-
-Os pedidos usam números fixos e status distintos para facilitar a avaliação:
-
-| Número | Status | `createdAt` UTC | Previsão de entrega |
-| --- | --- | --- | --- |
-| `DEMO-001` | `PENDING` | `2026-01-05T10:00:00.000Z` | `2026-01-15` |
-| `DEMO-002` | `PROCESSING` | `2026-02-10T14:30:00.000Z` | `2026-02-20` |
-| `DEMO-003` | `DELIVERED` | `2026-03-15T09:15:00.000Z` | `2026-03-17` |
-| `DEMO-004` | `CANCELLED` | `2026-04-20T16:45:00.000Z` | `2026-04-30` |
-
-Cada pedido tem itens demonstrativos com preços decimais em texto. Para consultar o pedido em processamento por status e dia de criação, use `GET /orders?status=PROCESSING&startDate=2026-02-10&endDate=2026-02-10` com o token Bearer obtido no login.
-
-O seed pode ser repetido: se um número já existir, não modifica nem apaga o pedido ou seus itens, mesmo quando o pedido foi editado ou está excluído logicamente. A unicidade do número continua reservada. O terminal informa quantos pedidos foram criados e quantos já existiam; não imprime senha ou hash.
-
-Cada pedido e seus itens são criados em uma escrita aninhada atômica. A lista inteira e o usuário não formam uma única transação: se ocorrer falha após alguns pedidos, os pedidos concluídos permanecem; uma execução posterior os conta como existentes e tenta criar os números que faltarem. Outros erros de banco são propagados e fazem o comando terminar com código diferente de zero; uma disputa concorrente é tratada como existência somente quando o erro identifica a restrição única de `order_number` e a linha conflitante é encontrada.
-
-## Integração contínua
-
-O workflow [CI](.github/workflows/ci.yml) é executado em pushes e pull requests. Ele instala as dependências com `npm ci`, gera o Prisma Client, executa lint, testes unitários e HTTP, aplica as migrations versionadas a um PostgreSQL temporário e executa os testes de integração, a verificação de tipos e o build. Não realiza deploy. O workflow usa Node 24.22.1; a versão efetivamente testada localmente é a indicada nos pré-requisitos acima.
-
-## Migrations e comandos
-
-- `npm run prisma:generate`: gera o Prisma Client.
-- `npm run db:migrate:deploy`: aplica migrations já versionadas.
-- `npm run db:migrate`: comando de desenvolvimento para criar e aplicar migrations.
-- `npm run db:seed`: cria o usuário demonstrativo se ausente e insere os pedidos fictícios `DEMO-001` a `DEMO-004` sem alterar registros existentes.
-- `npm run db:status`: consulta o estado das migrations.
-- `npm run lint`: verifica o código TypeScript em `src/` e `test/`.
-- `npm test` e `npm run test:e2e`: executam testes unitários e HTTP com módulo Nest e Prisma mockado; não usam o banco principal nem executam o seed. Incluem os testes das rotas de criação, consulta, listagem, atualização e exclusão lógica.
-- `npm run test:integration`: executa testes HTTP contra PostgreSQL real, incluindo atomicidade da substituição de itens, exclusão lógica persistente e concorrência controlada entre PATCH e exclusão. Exige `TEST_DATABASE_URL` apontando para uma base isolada chamada `naporta_orders_test_<sufixo>`; a suíte valida o nome e confirma a base conectada. Antes, configure `DATABASE_URL` com a mesma URL e aplique `npm run db:migrate:deploy`. A suíte limpa os registros de teste que criou; não remove banco, volume ou container.
-- `npm run build`: gera o client e compila a aplicação.
-
-### Banco isolado para testes de integração
-
-Execute em um terminal separado, na raiz do projeto, depois de instalar as dependências e gerar o Prisma Client. Os comandos abaixo criam outro projeto Compose e outro banco, com nomes exclusivos. Escolha uma porta livre se `55433` estiver ocupada. A senha gerada é apenas para o banco temporário de testes; não copie essa configuração para produção.
-
-PowerShell:
-
-```powershell
-$testId = [guid]::NewGuid().ToString('N').Substring(0, 12)
-$testProject = "naporta-it-$testId"
-$env:POSTGRES_USER = 'naporta_test'
-$env:POSTGRES_PASSWORD = [guid]::NewGuid().ToString('N')
-$env:POSTGRES_DB = "naporta_orders_test_$testId"
-$env:POSTGRES_PORT = '55433'
-$env:DATABASE_URL = "postgresql://$($env:POSTGRES_USER):$($env:POSTGRES_PASSWORD)@127.0.0.1:$($env:POSTGRES_PORT)/$($env:POSTGRES_DB)?schema=public"
-$env:TEST_DATABASE_URL = $env:DATABASE_URL
-docker compose -p $testProject up -d --wait
-npm run db:migrate:deploy
-npm run test:integration
-docker compose -p $testProject down
-```
-
-Alternativa Bash (requer `openssl`):
+O primeiro comando aguarda o banco ficar saudável. A migration aplica apenas
+arquivos versionados; o seed é explícito. A API estará em
+`http://127.0.0.1:3000` e o PostgreSQL em `127.0.0.1:5433`. Altere `API_PORT`
+ou `POSTGRES_PORT` se necessário. Para interromper e remover containers e rede,
+preservando o volume e os dados do banco:
 
 ```bash
-test_id="$(openssl rand -hex 6)"
-test_project="naporta-it-$test_id"
-export POSTGRES_USER=naporta_test
-export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
-export POSTGRES_DB="naporta_orders_test_$test_id"
-export POSTGRES_PORT=55433
-export DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}?schema=public"
-export TEST_DATABASE_URL="$DATABASE_URL"
-docker compose -p "$test_project" up -d --wait
-npm run db:migrate:deploy
-npm run test:integration
-docker compose -p "$test_project" down
+docker compose --profile api down
 ```
 
-A suíte remove os registros que criou. Execute o `down` do projeto de testes mesmo se algum comando anterior falhar: ele interrompe e remove o container e a rede desse projeto, mas preserva seu volume e o banco de testes. O volume temporário permanece após os testes; identifique-o pelo nome do projeto antes de decidir removê-lo, sem tocar em volumes preexistentes. Feche o terminal separado para descartar as variáveis de ambiente de teste. Para interromper a aplicação de desenvolvimento, use `Ctrl+C`; para parar o PostgreSQL local principal, `docker compose down` também mantém seu volume.
+## Swagger e autenticação
+
+Abra [http://127.0.0.1:3000/docs](http://127.0.0.1:3000/docs). Execute
+`POST /auth/login` com `DEMO_USER_EMAIL` e `DEMO_USER_PASSWORD` do `.env`,
+copie o `accessToken` e informe-o em **Authorize**. Em outras ferramentas, use
+`Authorization: Bearer <token>`. O token expira em 15 minutos. O documento
+OpenAPI também está em `/docs-json`.
+
+## Rotas e filtros
+
+Todas as rotas de pedidos exigem Bearer token. O Swagger contém os schemas,
+exemplos e respostas completos.
+
+| Método | Rota | Operação |
+| --- | --- | --- |
+| `POST` | `/auth/login` | Autenticar e obter token. |
+| `POST` | `/orders` | Criar pedido e itens. |
+| `GET` | `/orders` | Listar pedidos com filtros e paginação. |
+| `GET` | `/orders/:id` | Consultar pedido ativo. |
+| `PATCH` | `/orders/:id` | Atualizar parcialmente. |
+| `DELETE` | `/orders/:id` | Excluir logicamente; retorna `204`. |
+
+Os parâmetros de `GET /orders` são opcionais e combináveis:
+
+| Parâmetro | Formato ou limite |
+| --- | --- |
+| `orderNumber` | Correspondência exata, sem espaços externos. |
+| `status` | `PENDING`, `PROCESSING`, `DELIVERED` ou `CANCELLED`. |
+| `startDate`, `endDate` | `YYYY-MM-DD`, limites inclusivos de `createdAt` em UTC. |
+| `page` | Inteiro de 1 a 10000; padrão 1. |
+| `limit` | Inteiro de 1 a 100; padrão 20. |
+
+Exemplo com dados do seed:
+`GET /orders?status=PROCESSING&startDate=2026-02-10&endDate=2026-02-10`.
+A resposta contém `data` e `meta` (`page`, `limit`, `total`, `totalPages`).
+Uma página além da última retorna `data: []` mantendo os totais; sem resultados,
+`totalPages` é zero. A ordem é `createdAt` e depois `id`, ambos decrescentes.
+
+## Testes e execução local
+
+Para execução local, use **Node.js 24.22.1** (`.nvmrc`), npm 10 ou superior e
+um `.env` configurado. A versão de Node 24.22.1 e npm 11.19.1 foi validada
+localmente; o projeto declara `^24.22.1` em `engines`.
+
+```bash
+npm ci
+docker compose up -d --wait postgres
+npm run prisma:generate
+npm run db:migrate:deploy
+npm run db:seed
+npm run start:dev
+```
+
+Neste fluxo, `DATABASE_URL` usa o endereço do host, por padrão
+`localhost:5433`. A API escuta em `127.0.0.1` por padrão. Se o PostgreSQL usar
+outra porta, ajuste `POSTGRES_PORT` e `DATABASE_URL` no `.env`.
+
+```bash
+npm test                # unitários
+npm run test:e2e        # HTTP com Prisma mockado
+npm run lint
+npm run build
+```
+
+Os testes de integração usam PostgreSQL real e exigem um banco isolado com
+migrations aplicadas: consulte [testes de integração](docs/testes-integracao.md)
+para criar, configurar e encerrar o ambiente com segurança. O workflow
+[CI](.github/workflows/ci.yml) executa as verificações em pushes e pull requests;
+não realiza deploy.
+
+## Regras e limitações
+
+- Preços são strings decimais na API e `DECIMAL(12,2)` no banco.
+  `expectedDeliveryDate` é uma data de calendário `YYYY-MM-DD`.
+- No PATCH, campos omitidos são preservados. Se `items` for enviado, substitui
+  integralmente os itens em uma transação; `deliveryAddress.complement` aceita
+  `null`. A exclusão lógica preserva pedido e itens, oculta o pedido das
+  consultas e mantém o número reservado.
+- O seed cria o usuário e quatro pedidos fictícios `DEMO-001` a `DEMO-004`.
+  Ao repetir, não altera usuários ou pedidos existentes nem restaura excluídos.
+  Uma execução após falha parcial tenta criar os pedidos faltantes. Se a senha
+  configurada não corresponder à conta existente, use a senha conhecida ou
+  configure outro e-mail; o seed não redefine senhas.
+- O login aceita senhas de até 72 bytes UTF-8. O limite é de 5 requisições em
+  60 segundos por IPv4 ou sub-rede IPv6 /64, incluindo entradas inválidas e
+  logins bem-sucedidos. Ao exceder, retorna `429` e bloqueia por 60 segundos;
+  `Retry-After` informa o tempo restante. IPv4 mapeado em IPv6 compartilha o
+  contador com o IPv4 correspondente.
+- O contador fica em memória, é independente por instância e se perde ao
+  reiniciar. Usuários na mesma rede podem compartilhar o limite. O servidor
+  não confia em `X-Forwarded-For` por padrão; atrás de um proxy, clientes podem
+  compartilhar seu endereço até que um proxy confiável seja configurado.
+- A contagem e os dados da listagem são consultas separadas e não garantem um
+  snapshot comum. A imagem Docker inclui dependências de desenvolvimento para
+  executar Prisma e seed; a configuração fornecida é demonstrativa.

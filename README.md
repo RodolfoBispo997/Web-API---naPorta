@@ -20,7 +20,7 @@ O campo `deletedAt` registra a exclusão lógica. Pedidos excluídos continuam n
 
 ## Pré-requisitos
 
-- Node.js `^20.19.0 || ^22.12.0 || >=24.0.0`; validado nesta etapa em Node 20.20.0. Outras versões não foram testadas.
+- Node.js `^24.22.1`; recomenda-se Node 24.22.1, indicado em `.nvmrc` e validado localmente com npm 11.19.1. Outras versões da faixa não foram testadas nesta etapa.
 - No Node 20.20.0, a instalação emite um aviso de engine para a dependência transitiva `@prisma/streams-local`, que declara Node `>=22`. A instalação e as verificações descritas foram executadas com sucesso em Node 20.20.0 apesar do aviso.
 - npm 10 ou superior
 - Docker Desktop com Docker Compose v2 em execução
@@ -312,7 +312,7 @@ Cada pedido e seus itens são criados em uma escrita aninhada atômica. A lista 
 
 ## Integração contínua
 
-O workflow [CI](.github/workflows/ci.yml) é executado em pushes e pull requests. Ele instala as dependências com `npm ci`, gera o Prisma Client, executa lint, testes unitários e HTTP, aplica as migrations versionadas a um PostgreSQL temporário e executa os testes de integração, a verificação de tipos e o build. Não realiza deploy. O workflow usa Node 22.12.0; a versão efetivamente testada localmente é a indicada nos pré-requisitos acima.
+O workflow [CI](.github/workflows/ci.yml) é executado em pushes e pull requests. Ele instala as dependências com `npm ci`, gera o Prisma Client, executa lint, testes unitários e HTTP, aplica as migrations versionadas a um PostgreSQL temporário e executa os testes de integração, a verificação de tipos e o build. Não realiza deploy. O workflow usa Node 24.22.1; a versão efetivamente testada localmente é a indicada nos pré-requisitos acima.
 
 ## Migrations e comandos
 
